@@ -281,7 +281,7 @@ Two more ways, both free and optional:
   **Open this page through Tailscale** gives you the control page from anywhere, uploads and SSH included. It is a
   private link between your phone and your EO1; nothing is opened on your router.
 - **Through GitHub: settings and pictures.** With a GitHub gallery, the EO1 Remote also changes albums, settings
-  and pictures in your repository; those changes arrive within about 5-10 minutes.
+  and pictures in your repository; those changes arrive within about 2-3 minutes.
 
 ### EO1 Remote
 
@@ -296,7 +296,7 @@ A web page you save to your phone's home screen: **https://eo1bian.github.io/rem
 
 Then: screen on or off, brightness, schedule, time per picture, titles, what goes around pictures, albums,
 hiding pictures, adding pictures from the phone and deleting them. **Send to EO1** saves the changes in your
-repository; GitHub prepares them and the EO1 follows at its next check, within about 5-10 minutes. Next/previous
+repository; GitHub prepares them and the EO1 follows at its next check, within about 2-3 minutes. Next/previous
 and the live picture need the control page at home.
 
 The Remote writes `control.json` in your repository, and you can also edit that file yourself on github.com:
@@ -351,7 +351,7 @@ For video, add: `seamless loop, 12 seconds, slow gentle motion, static camera`.
 
 **Straight onto the frame with an AI assistant.** An assistant that can work in GitHub (for example Claude with
 a GitHub MCP connector) can make a picture and put it in your [GitHub gallery](#your-electric-objects-art-back-on-the-frame)
-for you: GitHub builds it in a few minutes, and the EO1 picks it up at its next check, within about 5 minutes.
+for you: GitHub builds it in about a minute, and the EO1 picks it up at its next check: on the frame within about 2-3 minutes.
 Something like this works:
 
 ```

@@ -187,7 +187,8 @@ def git_update(git, url, branch):
         os.makedirs(GIT_STORE, exist_ok=True)
         git("init", "-q")
         git("remote", "add", "origin", url)
-    git("remote", "set-url", "origin", url)
+    if git("config", "--get", "remote.origin.url", check=False) != url:   # only when it changed: checked every minute,
+        git("remote", "set-url", "origin", url)                             # so a check without news writes nothing
     remote = git("ls-remote", "origin", "refs/heads/" + branch).split()[:1]
     if not remote:
         raise RuntimeError("no branch %s in the gallery repository (has its build run yet?)" % branch)
@@ -327,7 +328,7 @@ def agent(cmd, **params):
 
 def apply_control(manifest):
     """control.json from the gallery repo: carry out each value that changed since the last time, so a change
-    made at home on the control page is not undone every 10 minutes - only a new edit on GitHub wins."""
+    made at home on the control page is not undone at every check - only a new edit on GitHub wins."""
     ctl = manifest.get("control")
     if not isinstance(ctl, dict):
         return
@@ -347,6 +348,7 @@ def apply_control(manifest):
                                     off=v.get("off", ""), on=v.get("on", ""),
                                     off2=v.get("off2", ""), on2=v.get("on2", "")),
     }
+    before = dict(done)
     for key, run in steps.items():
         if key in ctl and ctl[key] != done.get(key):
             try:
@@ -354,6 +356,8 @@ def apply_control(manifest):
                 done[key] = ctl[key]
             except Exception as e:  # noqa: BLE001 - a wrong value or the agent busy: tried again next time
                 log("control.json %s: %s" % (key, e))
+    if done == before:                           # nothing new: no write to the eMMC (this runs every minute)
+        return
     with open(CONTROL_DONE + ".tmp", "w") as f:
         json.dump(done, f)
     os.replace(CONTROL_DONE + ".tmp", CONTROL_DONE)

@@ -7,7 +7,7 @@ pictures are personal.
 2. Push. The workflow **Build the EO1 gallery** makes frame-ready copies on the branch `eo1`: pictures that
    fit the panel exactly, videos the frame's hardware decoder plays directly, and a `manifest.json`.
 3. On the frame, `eo1.txt` gets `github_repo=<you>/<this repo>` and `github_token=<fine-grained token with
-   read access to this repository's contents>`. The frame checks every 5 minutes and downloads only what is
+   read access to this repository's contents>`. The frame checks every minute and downloads only what is
    new, once, into its own storage.
 
 `gallery.json` sets seconds per picture and per video, shuffle, the cross-fade, titles

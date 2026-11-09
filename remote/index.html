@@ -18,7 +18,7 @@
      A static page (GitHub Pages): it talks only to api.github.com, with a fine-grained token the owner pastes once;
      the token stays in this browser (localStorage) and goes nowhere else. Changes are commits to the gallery repo:
      control.json (screen, brightness, schedule, ...), gallery.json (albums, hidden pictures) and images/.
-     GitHub builds the gallery, and the EO1 picks it up at its next check (a few minutes). -->
+     GitHub builds the gallery, and the EO1 picks it up at its next check (about 2-3 minutes). -->
 <style>
   :root {
     --bg: #14110f; --card: #1f1a17; --line: #3a312b; --text: #f3ece4; --dim: #a89c90;
@@ -159,7 +159,7 @@
     <div id="pairHint">To see your EO1 live: at home, open its control page and choose <b>Live from anywhere</b> &rsaquo;
       <b>Open the remote on this phone</b> (or scan its code with this phone).</div>
     <div id="ghIntro">Also, or instead: your <b>GitHub gallery</b> (albums, settings and pictures; changes reach the EO1 within
-      5-10 minutes).</div>
+      2-3 minutes).</div>
     <ol class="muted">
       <li>On GitHub: <b>Settings › Developer settings › Fine-grained tokens › Generate new token</b>.</li>
       <li>Repository access: <b>only your gallery repository</b>. Permissions: <b>Contents: Read and write</b>
@@ -176,7 +176,7 @@
     <section class="card">
       <label class="line"><span>Status</span><span class="muted" id="build"></span></label>
       <div class="muted">Changes are saved to GitHub; GitHub prepares them and the EO1 picks them up at its next check,
-        usually within 5-10 minutes.</div>
+        usually within 2-3 minutes.</div>
     </section>
 
     <section class="card">
@@ -261,7 +261,7 @@
 const $ = id => document.getElementById(id);
 // this page's version; version.txt next to it is fetched past every cache, and a newer one reloads the page, so a
 // phone (or a page on its home screen) never keeps an old copy
-const PAGE_VERSION = '202611091100';
+const PAGE_VERSION = '202611091300';
 async function checkVersion() {
   try {
     const v = (await (await fetch('version.txt?' + Date.now(), {cache: 'no-store'})).text()).trim();
@@ -674,7 +674,7 @@ async function send() {
       const r = await putFile('gallery.json', b64enc(JSON.stringify(gallery, null, 2) + '\n'), gallerySha, 'EO1 Remote: albums and hidden pictures');
       gallerySha = r.content.sha; galleryChanged = false;
     }
-    toast('Sent. The EO1 follows within about 5-10 minutes.');
+    toast('Sent. The EO1 follows within about 2-3 minutes.');
     setTimeout(buildStatus, 4000);
   } catch (e) {
     toast(e.message + (/sha|match/i.test(e.message) ? ' - reloading' : ''));
