@@ -1,0 +1,31 @@
+#!/bin/sh
+# Run a command with the boot partition's FAT briefly writable, then sync and make it read-only again.
+#   eo1-stick-write sh -c 'echo hi >> /media/eo1usb/logs/x.txt'
+#   eo1-stick-write --put /run/new-file /media/eo1usb/state/file      (atomic replace, see below)
+# Normally the FAT is mounted read-only (root = read-only image + RAM overlay), so pulling the power plug
+# never leaves a half-written FAT behind. In the fallback mode (no overlayfs, /run/eo1-mode = rw) it is
+# already writable and the command just runs.
+# Exit code: the command's, or 1 when the FAT could not be made writable, or read-only again afterwards.
+STICK=/media/eo1usb
+mountpoint -q "$STICK" || { echo "eo1-stick-write: $STICK is not mounted, nothing written" >&2; exit 0; }
+if [ "${1:-}" = "--put" ]; then
+	# copy next to the target, flush, rename over it: a power cut or a full partition leaves the old file or
+	# the new one, never a truncated one (cp -f truncates the target first)
+	set -- sh -c 'mkdir -p "$(dirname "$2")" && cp -f "$1" "$2.tmp" && sync && mv -f "$2.tmp" "$2" ||
+		{ rm -f "$2.tmp"; exit 1; }' _ "$2" "$3"
+fi
+exec 9>/run/eo1-stick.lock
+flock -w 120 9 || { echo "eo1-stick-write: the boot partition is busy" >&2; exit 1; }
+if [ "$(cat /run/eo1-mode 2>/dev/null)" = "rw" ]; then
+	"$@" 9>&-; rc=$?; sync; exit $rc
+fi
+mount -o remount,rw "$STICK" || exit 1
+mkdir -p "$STICK/logs" "$STICK/state" 2>/dev/null
+# the child does not inherit the lock: if a caller's timeout kills this shell, a leftover child cannot hold it
+"$@" 9>&-; rc=$?
+sync
+if ! mount -o remount,ro "$STICK"; then
+	sleep 1; sync
+	mount -o remount,ro "$STICK" || { echo "eo1-stick-write: the boot partition stayed writable" >&2; rc=1; }
+fi
+exit $rc

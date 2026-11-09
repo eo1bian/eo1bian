@@ -1,0 +1,37 @@
+[Unit]
+Description=EO1 kiosk (cage + Chromium) on tty1
+# systemd-user-sessions is needed: cage started 70 ms after logind hung forever in the logind session setup
+# (2 Nov 2026). No other network dependency; boot.html shows the last picture until the server answers.
+After=eo1-config.service eo1-agent.service systemd-logind.service systemd-user-sessions.service
+Wants=eo1-agent.service
+Conflicts=getty@tty1.service
+# kiosk=off in eo1.txt (eo1-config creates the flag): no browser, the text console stays visible
+ConditionPathExists=!/run/eo1-nokiosk
+# not with the native player (player=native in eo1.txt, the default)
+ConditionPathExists=!/run/eo1-player-native
+
+[Service]
+User=eo1
+PAMName=cage
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+StandardInput=tty-fail
+StandardOutput=journal
+StandardError=journal
+UtmpIdentifier=tty1
+UtmpMode=user
+Environment=XDG_SESSION_TYPE=wayland
+# gpu=off in eo1.txt: WLR_RENDERER=pixman (software rendering in cage, Chromium gets --disable-gpu)
+EnvironmentFile=-/run/eo1-kiosk.env
+ExecStart=/usr/local/bin/eo1-cage
+# the CPU is saturated between 15 and 30 s after kernel start: the browser gets priority, helpers wait
+Nice=-5
+Restart=always
+RestartSec=5
+# Chromium on a 1 GB board: restart before memory runs out (weeks of uptime)
+MemoryMax=600M
+
+[Install]
+WantedBy=graphical.target

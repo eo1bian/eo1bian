@@ -1,0 +1,12 @@
+#!/bin/sh
+# Called by eo1-config through eo1-stick-write (stick writable): store the new Wi-Fi profile on the stick and
+# replace the password in eo1.txt by "(saved)", keeping the rest of the file and its CRLF line ends.
+# The profile is written next to its place, flushed, renamed and checked first: eo1.txt only loses the
+# password once the profile with it is safely on the partition (a power cut in between must never lose it).
+SRC="$1"; STATE="$2"
+mkdir -p "$(dirname "$STATE")" || exit 1
+cp -f /run/eo1-wifi.nmconnection "$STATE.tmp" && sync && mv -f "$STATE.tmp" "$STATE" && sync || exit 1
+grep -q '^ssid=.' "$STATE" && cmp -s /run/eo1-wifi.nmconnection "$STATE" || exit 1
+tr -d '\r' < "$SRC" | sed 's/^\([[:space:]]*wifi_password[[:space:]]*=\).*/\1(saved)/' | sed 's/$/\r/' > "$SRC.tmp" &&
+	sync && mv -f "$SRC.tmp" "$SRC" && sync
+echo "$(date) Wi-Fi profile stored on the stick (state/wifi.nmconnection)" >> "$(dirname "$SRC")/logs/config.txt"

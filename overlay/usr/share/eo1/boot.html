@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>EO1</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; color: #e8e6e0; font: 34px/1.5 "DejaVu Sans", sans-serif; overflow: hidden; }
+  #last { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
+  .wrap { position: absolute; left: 0; right: 0; bottom: 0; padding: 60px 64px 90px; background: rgba(0,0,0,.85); display: none; }
+  .wrap.show { display: block; }
+  h1 { font-size: 46px; margin: 0 0 16px; font-weight: 600; }
+  .muted { color: #a3a29b; }
+  .ok { color: #7cc47f; } .bad { color: #f2867e; }
+  code { color: #e0a030; }
+</style>
+</head>
+<body>
+<!-- the picture the frame showed before the restart (state/last.jpg on the boot partition, written by eo1-agent):
+     shown at once, so the frame looks on while Chromium waits for Wi-Fi and the server. (Hosting the frame page
+     in an iframe over it did not render on the EO1's Chromium/etnaviv: iframe content stayed black, 2 Nov 2026.) -->
+<img id="last" src="file:///media/eo1usb/state/last.jpg" alt="" onerror="this.style.display='none'">
+<div class="wrap" id="wrap">
+  <h1>EO1 · Debian</h1>
+  <div id="s" class="muted">Starting…</div>
+</div>
+<script>
+  var s = document.getElementById('s'), wrap = document.getElementById('wrap'), t0 = Date.now();
+  function line(ok, txt) { return '<div class="' + (ok ? 'ok' : 'bad') + '">' + (ok ? '✓ ' : '✗ ') + txt + '</div>'; }
+  function check() {
+    fetch('http://127.0.0.1:2324/bootstatus', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (d) {
+      if (d.serverOk) {
+        // fetch the picture the frame page will show first, so it is in Chromium's cache before the page switches
+        // (the frame page starts dark until its first image has loaded)
+        var base = d.server.replace(/\/frame.*$/, '');
+        fetch(base + '/api/frame/state?scr=1080x1920', { cache: 'no-store' }).then(function (r) { return r.json(); })
+          .then(function (st) { return st.item && st.item.url ? fetch(base + st.item.url).then(function (r) { return r.blob(); }) : null; })
+          .catch(function () {}).then(function () { location.replace(d.server); });
+        return;
+      }
+      var w = d.wifi || {};
+      var html = line(w.connected, w.connected ? 'Wi-Fi «' + w.ssid + '» · ' + (w.ip || '') : 'No Wi-Fi. Put the network name and password in <code>eo1.txt</code> on the USB stick.');
+      html += line(false, 'Looking for the server: <code>' + d.server + '</code>');
+      html += '<div class="muted" style="margin-top:14px">' + d.hostname + '.local · agent ' + d.version + '</div>';
+      s.innerHTML = html;
+      // the status box only appears when something takes too long (normal boot: the picture, then the server)
+      if (Date.now() - t0 > 25000) { wrap.className = 'wrap show'; }
+      setTimeout(check, 1000);
+    }).catch(function () { s.textContent = 'Starting the agent…'; if (Date.now() - t0 > 25000) { wrap.className = 'wrap show'; } setTimeout(check, 1000); });
+  }
+  check();
+</script>
+</body>
+</html>

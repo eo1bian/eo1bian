@@ -1,0 +1,13 @@
+{
+  "name": "EO1",
+  "short_name": "EO1",
+  "description": "Control your Electric Objects EO1",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#14110f",
+  "theme_color": "#14110f",
+  "icons": [
+    {"src": "/icon.svg", "sizes": "any", "type": "image/svg+xml"},
+    {"src": "/icon.png", "sizes": "512x512", "type": "image/png"}
+  ]
+}

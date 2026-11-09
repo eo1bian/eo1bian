@@ -1,0 +1,38 @@
+name: Build the EO1 gallery
+# On every push to main: originals in images/ and videos/ -> EO1-ready files + manifest.json on the branch "eo1"
+# (one commit, force-pushed, so the repository does not grow with every build). The frame reads only that branch.
+on:
+  push:
+    branches: [main]
+    paths: ["images/**", "videos/**", "gallery.json", "control.json", "build.py", ".github/workflows/eo1.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: eo1-build
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Previous build (unchanged files are not rebuilt)
+        run: |
+          mkdir -p out
+          if git fetch -q --depth 1 origin eo1; then git archive FETCH_HEAD | tar -x -C out; fi
+      - name: Tools
+        run: |
+          sudo apt-get update -q && sudo apt-get install -y -q ffmpeg
+          pip install -q pillow pillow-heif
+      - name: Build
+        run: python build.py . out
+      - name: Publish to the eo1 branch
+        run: |
+          cd out
+          git init -q -b eo1
+          git add -A
+          git -c user.name=eo1-build -c user.email=eo1-build@users.noreply.github.com commit -qm "EO1 build ${GITHUB_SHA::7}"
+          git push -fq "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" eo1

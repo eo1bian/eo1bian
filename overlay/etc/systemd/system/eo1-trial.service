@@ -1,0 +1,13 @@
+[Unit]
+Description=EO1: accept or roll back a trial boot (boot files changed over SSH)
+# polls the network itself: no network-online.target (that pulls in NetworkManager-wait-online, 14-60 s)
+After=NetworkManager.service eo1-config.service
+ConditionPathExists=/media/eo1usb/trial/pending
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/eo1-trial
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target

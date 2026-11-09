@@ -1,0 +1,10 @@
+#!/bin/sh
+# eo1-player.service: which player runs.
+#   eo1-layers present and compositor is not "classic" in eo1.conf (eo1.txt) -> player-layers.py
+#     (one process owns the panel, hardware cross-fades of live videos; needs the EO1 kernel's plane alpha)
+#   otherwise -> player.py (eo1-show for pictures, eo1-video for videos)
+C=$(sed -n 's/^compositor=//p' /etc/eo1/eo1.conf 2>/dev/null)
+if [ -x /usr/local/bin/eo1-layers ] && [ "$C" != classic ]; then
+	exec /usr/bin/python3 /usr/local/lib/eo1/player-layers.py
+fi
+exec /usr/bin/python3 /usr/local/lib/eo1/player.py

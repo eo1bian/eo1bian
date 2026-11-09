@@ -1,0 +1,9 @@
+[Unit]
+Description=EO1: check the GitHub gallery 2 min after boot, then every 5 min (also how fast control.json from the Remote arrives)
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+
+[Install]
+WantedBy=timers.target

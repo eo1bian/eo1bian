@@ -1,0 +1,27 @@
+#!/bin/sh
+# Write a diagnostic report to the USB stick (logs/boot-latest.txt) so it can be read on a PC even if the panel
+# stays black. Runs 60 s and 5 min after boot (eo1-bootlog.timer). No passwords: NetworkManager keyfiles are not read.
+STICK=/media/eo1usb
+mountpoint -q "$STICK" || exit 0
+OUT=/run/eo1-boot-latest.txt
+{
+	echo "=== $(date)  uptime: $(cat /proc/uptime)"
+	echo "=== uname";   uname -a
+	echo "=== cmdline"; cat /proc/cmdline
+	echo "=== ip";      ip -br addr; ip route
+	echo "=== nmcli";   nmcli -t general status 2>&1; nmcli -t -f DEVICE,TYPE,STATE,CONNECTION dev 2>&1; nmcli -t -f SSID,SIGNAL dev wifi list 2>&1 | head -20
+	echo "=== failed units"; systemctl --failed --no-pager 2>&1
+	echo "=== kiosk";   systemctl status eo1-kiosk --no-pager -n 30 2>&1
+	echo "=== agent";   systemctl status eo1-agent --no-pager -n 10 2>&1
+	echo "=== drm";     ls -l /sys/class/drm 2>&1; for c in /sys/class/drm/card*-*; do echo "$c $(cat $c/status 2>/dev/null) $(head -1 $c/modes 2>/dev/null)"; done
+	echo "=== backlight"; for b in /sys/class/backlight/*; do echo "$b $(cat $b/brightness 2>/dev/null)/$(cat $b/max_brightness 2>/dev/null) bl_power=$(cat $b/bl_power 2>/dev/null)"; done
+	echo "=== input";   cat /proc/bus/input/devices 2>&1
+	echo "=== usb";     ls /sys/bus/usb/devices 2>&1
+	echo "=== mmc";     ls /sys/class/mmc_host 2>&1; cat /sys/bus/sdio/devices/*/uevent 2>/dev/null
+	echo "=== lsmod";   lsmod
+	echo "=== dmesg";   dmesg | tail -n 400
+	echo "=== journal warnings"; journalctl -b -p warning --no-pager 2>&1 | tail -n 200
+} > "$OUT.tmp" 2>&1
+mv "$OUT.tmp" "$OUT"
+# only the latest report is kept (dated copies filled the 20 MB boot partition on the eMMC); the previous one as .prev
+eo1-stick-write sh -c "[ -f $STICK/logs/boot-latest.txt ] && mv -f $STICK/logs/boot-latest.txt $STICK/logs/boot-prev.txt; cp -f $OUT $STICK/logs/boot-latest.txt"

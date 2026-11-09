@@ -1,0 +1,12 @@
+[Unit]
+Description=EO1: boot-time measurement (frame page + screenshot + stage timestamps to logs/boottime.txt)
+After=eo1-kiosk.service
+
+[Service]
+Nice=19
+Type=oneshot
+ExecStart=/usr/local/bin/eo1-boottime
+TimeoutStartSec=400
+
+[Install]
+WantedBy=multi-user.target

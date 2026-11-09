@@ -1,0 +1,9 @@
+[Unit]
+Description=EO1: refresh the random seed on the boot partition 90 s after boot
+
+[Timer]
+OnBootSec=90
+AccuracySec=10
+
+[Install]
+WantedBy=timers.target

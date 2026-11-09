@@ -1,0 +1,14 @@
+#!/bin/sh
+# initramfs-tools hook: the WL1271 firmware/NVS (wlcore asks for them at probe time, which now happens in the
+# initramfs).
+PREREQ=""
+prereqs() { echo "$PREREQ"; }
+case "$1" in prereqs) prereqs; exit 0 ;; esac
+. /usr/share/initramfs-tools/hook-functions
+for f in /lib/firmware/ti-connectivity/wl127x-fw-5-sr.bin /lib/firmware/ti-connectivity/wl127x-fw-5-mr.bin \
+	/lib/firmware/ti-connectivity/wl127x-nvs.bin /lib/firmware/ti-connectivity/wl1271-nvs.bin; do
+	[ -e "$f" ] && copy_file firmware "$f"
+done
+# RNG seed crediting tool (see build/eo1-seed-credit.c)
+[ -x /usr/local/sbin/eo1-seed-credit ] && copy_exec /usr/local/sbin/eo1-seed-credit /sbin
+exit 0

@@ -1,0 +1,17 @@
+[Unit]
+Description=EO1: read Chromium and cage into RAM early (eMMC: ~3 s of the browser's cold start is disk)
+DefaultDependencies=no
+After=local-fs.target
+# only on the eMMC: from a USB stick this competed with everything else for the slow stick
+ConditionKernelCommandLine=eo1root
+# measured 2 Nov 2026: reading 250 MB took 10 s and overlapped the browser start, which got 2 s slower.
+# Off unless /run/eo1-preload-on exists (experiment switch).
+ConditionPathExists=/run/eo1-preload-on
+
+[Service]
+Type=simple
+Nice=10
+ExecStart=/bin/sh -c 'cat /usr/lib/chromium/chromium /usr/lib/chromium/*.pak /usr/lib/chromium/*.bin /usr/lib/chromium/icudtl.dat /usr/bin/cage /usr/lib/arm-linux-gnueabihf/libwlroots.so* /usr/lib/arm-linux-gnueabihf/libnss3.so /usr/lib/arm-linux-gnueabihf/libnspr4.so > /dev/null 2>&1; exit 0'
+
+[Install]
+WantedBy=sysinit.target

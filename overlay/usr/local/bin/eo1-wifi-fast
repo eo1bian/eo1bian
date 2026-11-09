@@ -1,0 +1,44 @@
+#!/bin/sh
+# Wi-Fi at boot on the last known channel. eo1-config adds scan_freq=<last channel> to the network when
+# state/wifi-freq names the same network, so wpa_supplicant scans one channel (~0.2 s) instead of all of them
+# (~3.4 s). If the frame is not associated 8 s after wpa_supplicant answers (the router moved channel, another
+# place), the channel is dropped and wpa_supplicant scans everything as before. Once connected, the channel in
+# use is saved for the next boot (the boot partition is only written when it changed).
+CONF=/etc/wpa_supplicant/wpa_supplicant-wlan0.conf
+SAVED=/media/eo1usb/state/wifi-freq
+LOG=/media/eo1usb/logs/netwatch.txt
+st() { wpa_cli -i wlan0 status 2>/dev/null; }
+connected() { st | grep -q '^wpa_state=COMPLETED'; }
+
+i=0
+until st | grep -q '^wpa_state='; do
+	i=$((i + 1)); [ $i -gt 120 ] && exit 0
+	sleep 0.25
+done
+i=0
+until connected; do
+	i=$((i + 1))
+	if [ $i -eq 32 ] && grep -q 'scan_freq=' "$CONF"; then
+		sed -i '/scan_freq=/d' "$CONF"; chmod 600 "$CONF"
+		wpa_cli -i wlan0 reconfigure >/dev/null
+		eo1-stick-write sh -c "echo \"\$(date) Wi-Fi not found on the last channel in 8 s: scanning all channels\" >> $LOG"
+	fi
+	[ $i -gt 480 ] && exit 0
+	sleep 0.25
+done
+FREQ=$(st | sed -n 's/^freq=//p')
+SSID=$(st | sed -n 's/^ssid=//p')
+# connected: lift the one-channel restriction for the rest of the uptime, or a router that later moves to
+# another channel (reboot, auto channel) would never be found again until a power cycle. The file loses the
+# line (for a later reconfigure), the running network gets every 2.4 GHz channel (no reconnect needed).
+if grep -q 'scan_freq=' "$CONF"; then
+	sed -i '/scan_freq=/d' "$CONF"; chmod 600 "$CONF"
+	wpa_cli -i wlan0 set_network 0 scan_freq "2412 2417 2422 2427 2432 2437 2442 2447 2452 2457 2462 2467 2472" >/dev/null
+fi
+[ -n "$FREQ" ] || exit 0
+if [ "$(sed -n 's/^freq=//p' "$SAVED" 2>/dev/null)" != "$FREQ" ] || [ "$(sed -n 's/^ssid=//p' "$SAVED" 2>/dev/null)" != "$SSID" ]; then
+	umask 077
+	printf 'ssid=%s\nfreq=%s\n' "$SSID" "$FREQ" > /run/eo1-wifi-freq
+	eo1-stick-write --put /run/eo1-wifi-freq "$SAVED"
+fi
+exit 0

@@ -1,0 +1,13 @@
+#!/bin/sh
+# sshd host keys: generated once, kept in state/ssh on the stick (the root filesystem is a RAM overlay, and
+# generating them every boot took 16 s of CPU and changed the frame's SSH identity each time).
+D=/media/eo1usb/state/ssh
+if ls "$D"/ssh_host_*_key >/dev/null 2>&1; then
+	cp -f "$D"/ssh_host_* /etc/ssh/
+	chmod 600 /etc/ssh/ssh_host_*_key
+	chmod 644 /etc/ssh/ssh_host_*_key.pub
+else
+	ssh-keygen -A
+	mountpoint -q /media/eo1usb && eo1-stick-write sh -c "mkdir -p $D && cp -f /etc/ssh/ssh_host_* $D/"
+fi
+exit 0

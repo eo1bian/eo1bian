@@ -1,0 +1,13 @@
+[Unit]
+Description=EO1: Wi-Fi on the last known channel at boot, full scan as fallback
+DefaultDependencies=no
+After=wpa_supplicant@wlan0.service
+ConditionPathExists=!/run/eo1-nm-on
+
+[Service]
+Type=simple
+Nice=10
+ExecStart=/usr/local/bin/eo1-wifi-fast
+
+[Install]
+WantedBy=multi-user.target

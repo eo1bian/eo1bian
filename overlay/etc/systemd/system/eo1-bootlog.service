@@ -1,0 +1,7 @@
+[Unit]
+Description=EO1: write a boot report to the USB stick
+
+[Service]
+Nice=19
+Type=oneshot
+ExecStart=/usr/local/bin/eo1-bootlog

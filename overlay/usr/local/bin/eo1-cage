@@ -1,0 +1,32 @@
+#!/bin/sh
+# Start the kiosk compositor. cage 0.1.4 (Debian 12) has no output-management protocol, so wlr-randr cannot
+# rotate; cage's own -r (90 degrees clockwise, repeatable) is used instead. rotate= in eo1.txt is clockwise
+# degrees: 0, 90, 180 or 270 (the EO1 hanging in portrait with the cable at the bottom needs 270).
+ROTATE=$(sed -n 's/^rotate=//p' /etc/eo1/eo1.conf 2>/dev/null)
+case "$ROTATE" in
+	90) R="-r" ;;
+	180) R="-r -r" ;;
+	270) R="-r -r -r" ;;
+	*) R="" ;;
+esac
+# The display controller (imx-drm) must be cage's KMS device. Which DRM card gets minor 0 depends on probe order:
+# with the EO1 kernel (drivers built in) etnaviv is card0 and cage hung on that render-only GPU.
+if [ -e /dev/dri/by-path/platform-display-subsystem-card ]; then
+	export WLR_DRM_DEVICES=/dev/dri/by-path/platform-display-subsystem-card
+fi
+
+# A wall frame has no keyboard/mouse: without this wlroots refuses to start when no input device exists (the only
+# one on the EO1 was the HDMI CEC "dw_hdmi" device - gone with HDMI disabled or with the EO1 kernel)
+export WLR_LIBINPUT_NO_DEVICES=1
+
+# cage-eo1 = cage 0.1.4 with a background picture (/run/splash.rgba, see debian/build/cage-splash.patch); the stock
+# cage is the fallback when it is missing or dies within 10 s
+if [ -x /usr/local/bin/cage-eo1 ]; then
+	T0=$(cut -d. -f1 /proc/uptime)
+	/usr/local/bin/cage-eo1 -d -s $R -- /usr/local/bin/eo1-browser
+	rc=$?
+	T1=$(cut -d. -f1 /proc/uptime)
+	[ $((T1 - T0)) -ge 10 ] && exit $rc
+	echo "eo1-cage: cage-eo1 exited with $rc after $((T1 - T0)) s, falling back to /usr/bin/cage" >&2
+fi
+exec /usr/bin/cage -d -s $R -- /usr/local/bin/eo1-browser

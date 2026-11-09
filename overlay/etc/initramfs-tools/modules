@@ -1,0 +1,39 @@
+# Everything the initramfs needs before the root filesystem exists (MODULES=list, see conf.d/eo1):
+# eMMC (usdhc4) and the USB OTG controller + storage (the stick), the FAT config partition, ext4 root (image
+# over loop on the stick, or the eMMC partition) with the RAM overlay, the display (splash on fb0) and Wi-Fi.
+sdhci-esdhc-imx
+sdhci-pltfm
+sdhci
+cqhci
+mmc_block
+ci_hdrc_imx
+ci_hdrc
+usbmisc_imx
+phy_mxs_usb
+ehci_hcd
+usb_storage
+uas
+sd_mod
+vfat
+fat
+nls_cp437
+nls_ascii
+nls_iso8859_1
+nls_utf8
+loop
+ext4
+overlay
+imxdrm
+imx-ipu-v3
+imx-ldb
+# the HDMI and parallel-display components stay in the device tree (cage hangs without them): needed for imx-drm to bind
+dw-hdmi-imx
+parallel-display
+panel-simple
+pwm-bl
+pwm-imx27
+etnaviv
+wlcore_sdio
+wl12xx
+i2c-imx
+gpio-mxc

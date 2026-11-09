@@ -1,0 +1,9 @@
+[Unit]
+Description=EO1: one boot report 90 s after boot
+
+[Timer]
+OnBootSec=90
+AccuracySec=5
+
+[Install]
+WantedBy=timers.target

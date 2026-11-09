@@ -1,0 +1,33 @@
+# ntfy server.yml for EO1 live remotes (container: binwiederhier/ntfy, published on 127.0.0.1:8097).
+# Replace ntfy.example.com. Pick one access mode at the bottom.
+#
+# The limits are per network (IP address) and sized from what an EO1 does: one open stream for commands, a status
+# message only when the picture or a setting changes while a phone watches (5 minutes after each "watch"), and an
+# album's small pictures as one message of at most ~1 MB however big the album is (80 pictures at most).
+# A busy evening of tapping stays far below them; anything else hits them fast (429) and fail2ban takes over.
+base-url: "https://ntfy.example.com"
+listen-http: ":80"
+behind-proxy: true
+cache-file: "/var/cache/ntfy/cache.db"
+cache-duration: "1h"                          # commands older than 2 minutes are refused by the EO1 anyway
+attachment-cache-dir: "/var/cache/ntfy/attachments"
+attachment-total-size-limit: "2G"
+attachment-file-size-limit: "2M"
+attachment-expiry-duration: "1h"
+auth-file: "/var/lib/ntfy/user.db"
+auth-default-access: "deny-all"
+enable-login: false
+enable-signup: false
+web-root: "disable"
+visitor-request-limit-burst: 60
+visitor-request-limit-replenish: "3s"
+visitor-message-daily-limit: 3000
+visitor-subscription-limit: 10
+visitor-attachment-total-size-limit: "30M"
+visitor-attachment-daily-bandwidth-limit: "300M"
+
+# Access, after the first start (docker exec ntfy ...):
+#   only your own EO1s and phones (a token you paste on the control page):
+#     NTFY_PASSWORD=<random> ntfy user add my-eo1 ; ntfy access my-eo1 'eo1-*' rw ; ntfy token add my-eo1
+#   or open to every EO1 (the filter still lets nothing else through):
+#     ntfy access everyone 'eo1-*' rw

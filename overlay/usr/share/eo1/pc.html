@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#14110f">
+<title>Connect this computer to your EO1</title>
+<style>
+  :root { --bg: #14110f; --card: #1f1a17; --line: #3a312b; --text: #f3ece4; --dim: #a89c90; --accent: #f0a24a; --ink: #1b1209; --bad: #e5675a; --ok: #7bc67e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 17px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; padding: 32px 16px; }
+  main { max-width: 640px; margin: 0 auto; display: grid; gap: 16px; }
+  h1 { font-size: 28px; margin: 0; }
+  .muted { color: var(--dim); font-size: 15px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 18px; display: grid; gap: 12px; }
+  .code { display: flex; gap: 10px; }
+  .code input { flex: 1; font: 600 32px/1 ui-monospace, Consolas, monospace; letter-spacing: .4em; text-align: center; padding: 14px;
+                border-radius: 12px; border: 1px solid var(--line); background: #2a231e; color: var(--text); min-width: 0; }
+  button { padding: 14px 18px; border-radius: 12px; border: 0; background: var(--accent); color: var(--ink); font: inherit; font-weight: 700; cursor: pointer; }
+  button.ghost { background: #2a231e; color: var(--text); border: 1px solid var(--line); font-weight: 600; }
+  .cmd { display: flex; gap: 10px; align-items: stretch; }
+  .cmd code { flex: 1; font: 17px/1.4 ui-monospace, Consolas, monospace; background: #000; border: 1px solid var(--line); border-radius: 10px;
+              padding: 14px; overflow-x: auto; white-space: nowrap; }
+  ol { margin: 0; padding-left: 22px; } li { margin: 4px 0; }
+  #msg.bad { color: var(--bad); } #msg.ok { color: var(--ok); }
+  details summary { cursor: pointer; color: var(--dim); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Connect this computer</h1>
+  <div class="muted">For SSH, your own scripts and AI assistants. On your phone's EO1 control page, choose <b>Connect a computer</b>: it shows a 4-digit code.</div>
+  <section class="card">
+    <label for="code">Code from the control page</label>
+    <div class="code"><input id="code" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="0000"><button onclick="go()">Continue</button></div>
+    <div id="msg" class="muted"></div>
+  </section>
+  <section class="card" id="steps" style="display:none">
+    <ol id="how"></ol>
+    <div class="cmd"><code id="main"></code><button onclick="copy('main', this)">Copy</button></div>
+    <div class="muted">It makes an SSH key on this computer if there is none, sends its public half to the EO1 with the code (once, within 10 minutes), and adds the shortcut <code id="alias">ssh eo1</code>.</div>
+    <details><summary>Other systems, or if the name does not work</summary>
+      <div id="others" style="display:grid;gap:10px;margin-top:10px"></div>
+    </details>
+  </section>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const OS = /Windows/i.test(navigator.userAgent) ? 'windows' : /Mac/i.test(navigator.userAgent) ? 'mac' : 'linux';
+const HOW = {
+  windows: ['Press the <b>Windows</b> key, type <b>PowerShell</b> and press Enter.', 'Paste this line and press Enter:'],
+  mac: ['Open <b>Terminal</b> (Spotlight: Cmd+Space, type Terminal).', 'Paste this line and press Enter:'],
+  linux: ['Open a terminal.', 'Paste this line and press Enter:'],
+};
+function copy(id, b) {
+  const t = $(id).textContent;
+  (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(() => { b.textContent = 'Copied'; setTimeout(() => b.textContent = 'Copy', 1500); })
+    .catch(() => { const r = document.createRange(); r.selectNode($(id)); getSelection().removeAllRanges(); getSelection().addRange(r); });
+}
+async function go() {
+  const code = $('code').value.trim();
+  $('msg').className = 'muted';
+  if (!/^\d{4}$/.test(code)) { $('msg').className = 'bad'; $('msg').textContent = 'Type the 4 digits from the control page.'; return; }
+  const r = await fetch('/pair/' + code + '/info').catch(() => null);
+  const j = r ? await r.json().catch(() => ({})) : {};
+  if (!r || !r.ok) { $('msg').className = 'bad'; $('msg').textContent = j.statustext || 'Cannot reach the EO1.'; return; }
+  const c = j.commands;
+  $('msg').className = 'ok'; $('msg').textContent = 'Code accepted.';
+  $('how').innerHTML = HOW[OS].map(s => '<li>' + s + '</li>').join('');
+  $('main').textContent = c[OS];
+  const rows = [['Windows (PowerShell)', c.windows], ['Mac / Linux (Terminal)', c.mac], ['Windows, by address', c.windowsIp], ['Mac / Linux, by address', c.unixIp]];
+  $('others').innerHTML = rows.map(([k, v], i) => `<div class="muted">${k}</div><div class="cmd"><code id="o${i}">${v}</code><button class="ghost" onclick="copy('o${i}', this)">Copy</button></div>`).join('');
+  $('steps').style.display = '';
+}
+$('code').addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
+$('code').focus();
+</script>
+</body>
+</html>

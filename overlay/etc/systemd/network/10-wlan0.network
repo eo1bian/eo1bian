@@ -1,0 +1,15 @@
+# EO1 Wi-Fi without NetworkManager: wpa_supplicant@wlan0 associates (started as soon as wlan0 exists, ~9 s
+# after kernel start), systemd-networkd does DHCP. NetworkManager started ~16 s and lost 3-12 s on a rescan
+# after a first authentication the driver rejects; wpa_supplicant alone retries within a second.
+[Match]
+Name=wlan0
+
+[Network]
+DHCP=ipv4
+IPv6AcceptRA=no
+LinkLocalAddressing=no
+
+[DHCPv4]
+UseDNS=yes
+UseHostname=no
+RouteMetric=10

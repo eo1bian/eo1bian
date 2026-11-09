@@ -1,0 +1,15 @@
+[Unit]
+Description=EO1: early boot trace to the USB stick (dmesg + pending jobs every 10 s, first 3 min)
+DefaultDependencies=no
+After=local-fs.target eo1-config.service
+Wants=local-fs.target
+# only with trace=on in eo1.txt (writes to the stick every 3 s during boot)
+ConditionPathExists=/run/eo1-trace-on
+
+[Service]
+Nice=19
+Type=simple
+ExecStart=/usr/local/bin/eo1-trace
+
+[Install]
+WantedBy=sysinit.target

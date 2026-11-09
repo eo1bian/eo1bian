@@ -1,0 +1,11 @@
+[Unit]
+Description=EO1: fall back to NetworkManager if Wi-Fi is not up 100 s after boot
+After=eo1-config.service
+
+[Service]
+Type=simple
+Nice=19
+ExecStart=/usr/local/bin/eo1-netwatch
+
+[Install]
+WantedBy=multi-user.target

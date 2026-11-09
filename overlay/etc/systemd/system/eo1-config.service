@@ -1,0 +1,14 @@
+[Unit]
+Description=EO1: apply eo1.txt from the USB stick (Wi-Fi, server, rotation)
+DefaultDependencies=no
+After=local-fs.target
+Before=NetworkManager.service eo1-agent.service eo1-kiosk.service
+ConditionPathIsDirectory=/media/eo1usb
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/eo1-config
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

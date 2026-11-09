@@ -1,0 +1,13 @@
+[Unit]
+Description=EO1 gallery storage (Android's old CACHE partition, ext4, 512 MB)
+ConditionPathExists=/dev/disk/by-label/CACHE
+
+[Mount]
+What=/dev/disk/by-label/CACHE
+Where=/media/eo1gallery
+Type=ext4
+# written only when the gallery changes; noatime: reading pictures never writes
+Options=noatime,errors=remount-ro
+
+[Install]
+WantedBy=multi-user.target

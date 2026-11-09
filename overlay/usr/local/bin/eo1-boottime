@@ -1,0 +1,90 @@
+#!/bin/sh
+# Boot-time measurement (bring-up): waits for Chromium to show the server's frame page, takes a screenshot of
+# it, then writes logs/boottime.txt on the boot partition with the seconds since kernel start for every stage:
+# initramfs, fb0, systemd, agent, kiosk, NetworkManager, Wi-Fi association, DHCP, frame page, screenshot.
+# Read from the PC with debian/build/measure-boot.sh.
+STICK=/media/eo1usb
+up() { cut -d' ' -f1 /proc/uptime; }
+page=""
+if [ -e /run/eo1-player-native ]; then
+	# native player: the first server picture is up when the player's status file names an item
+	i=0
+	while [ $i -lt 240 ]; do
+		grep -q '"id"' /run/eo1-player.json 2>/dev/null && break
+		sleep 0.5; i=$((i + 1))
+	done
+	t_page=$(up)
+	page="native player: $(cat /run/eo1-player.json 2>/dev/null | cut -c1-80)"
+	t_cage=""; t_browser=""; t_shot=""; shot=""
+	sleep 10
+	J=$(journalctl -b --no-pager -o short-monotonic 2>/dev/null)
+	ts() { echo "$J" | grep -E "$1" | head -n 1 | sed -n 's/^\[ *\([0-9.]*\)\].*/\1/p'; }
+	{
+		echo "boot $(date '+%Y-%m-%d %H:%M:%S')  id $(cat /proc/sys/kernel/random/boot_id)  cmdline: $(cat /proc/cmdline | cut -c1-60)"
+		sed 's/^/initramfs  /' /run/eo1-initramfs.txt 2>/dev/null
+		echo "fb0        $(ts 'fb0: imx-drm')"
+		echo "systemd    $(ts 'systemd\[1\]: Detected architecture|Running in system mode|systemd .* running in system mode')"
+		echo "basic      $(ts 'Reached target basic.target')"
+		echo "agent      $(ts 'Started eo1-agent')"
+		echo "player     $(ts 'Started eo1-player')"
+		echo "last_pic   $(ts 'last picture shown')"
+		echo "wpa_start  $(ts 'Started wpa_supplicant@wlan0')"
+		echo "wifi_assoc $(ts 'Association completed|CTRL-EVENT-CONNECTED')"
+		echo "dhcp       $(ts 'dhcp4 \(wlan0\): state changed new lease|wlan0: DHCPv4 address')"
+		echo "first_srv  $(ts 'python3\[[0-9]+\]: [0-9:]+ (image|video) [0-9]')"
+		echo "page       $t_page  $page"
+	} > /run/boottime.txt
+	eo1-stick-write sh -c "mkdir -p $STICK/logs; cp -f /run/boottime.txt $STICK/logs/boottime.txt; [ \$(stat -c %s $STICK/logs/boottime-history.txt 2>/dev/null || echo 0) -lt 200000 ] && cat /run/boottime.txt >> $STICK/logs/boottime-history.txt"
+	exit 0
+fi
+# the compositor's background (patched cage) right after it starts, before any browser frame
+i=0
+while [ $i -lt 120 ] && [ ! -S /run/user/1000/wayland-0 ]; do sleep 0.5; i=$((i + 1)); done
+t_cage=$(up)
+sleep 1.5
+timeout 15 runuser -u eo1 -- env XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 HOME=/home/eo1 grim -s 0.25 -t png /tmp/boot-shot-early.png 2>/dev/null && cp -f /tmp/boot-shot-early.png /run/boot-shot-early.png
+# when does the browser answer at all (boot.html)?
+i=0
+while [ $i -lt 120 ]; do
+	curl -s -m 1 -o /dev/null http://127.0.0.1:9222/json 2>/dev/null && break
+	sleep 0.5; i=$((i + 1))
+done
+t_browser=$(up)
+i=0
+while [ $i -lt 200 ]; do   # at most ~100-300 s
+	page=$(curl -s -m 1 http://127.0.0.1:9222/json 2>/dev/null | grep -o '"url": *"[^"]*' | grep '/frame' | head -n 1 | sed 's/.*"//')
+	[ -n "$page" ] && break
+	sleep 0.5; i=$((i + 1))
+done
+t_page=$(up)
+sleep 6   # the frame page starts dark until its first image is up
+shot=""
+if timeout 20 runuser -u eo1 -- env XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 HOME=/home/eo1 grim -s 0.25 -t png /tmp/boot-shot.png 2>/run/grim-err.txt; then
+	shot="boot-shot.png"
+	cp -f /tmp/boot-shot.png /run/boot-shot.png
+fi
+t_shot=$(up)
+sleep 15   # let Wi-Fi/DHCP land in the journal even on a slow boot
+J=$(journalctl -b --no-pager -o short-monotonic 2>/dev/null)
+ts() { echo "$J" | grep -E "$1" | head -n 1 | sed -n 's/^\[ *\([0-9.]*\)\].*/\1/p'; }
+{
+	echo "boot $(date '+%Y-%m-%d %H:%M:%S')  id $(cat /proc/sys/kernel/random/boot_id)  cmdline: $(cat /proc/cmdline | cut -c1-60)"
+	sed 's/^/initramfs  /' /run/eo1-initramfs.txt 2>/dev/null
+	echo "fb0        $(ts 'fb0: imx-drm')"
+	echo "systemd    $(ts 'systemd\[1\]: Detected architecture|Running in system mode|systemd .* running in system mode')"
+	echo "basic      $(ts 'Reached target basic.target')"
+	echo "agent      $(ts 'Started eo1-agent')"
+	echo "kiosk      $(ts 'Started eo1-kiosk')"
+	echo "netmgr     $(ts 'Started NetworkManager.service')"
+	echo "wifi_assoc $(ts 'Association completed')"
+	echo "dhcp       $(ts 'dhcp4 \(wlan0\): state changed new lease|wlan0: DHCPv4 address')"
+	echo "wpa_start  $(ts 'Started wpa_supplicant@wlan0')"
+	echo "cage       $t_cage"
+	echo "browser    $t_browser"
+	echo "page       $t_page  $page"
+	echo "screenshot $t_shot  $shot $(head -c 120 /run/grim-err.txt 2>/dev/null | tr "
+" " ")"
+	echo "userspace  $(systemd-analyze 2>/dev/null | head -n 1)"
+} > /run/boottime.txt
+eo1-stick-write sh -c "mkdir -p $STICK/logs; cp -f /run/boottime.txt $STICK/logs/boottime.txt; [ -f /run/boot-shot.png ] && cp -f /run/boot-shot.png $STICK/logs/boot-shot.png; [ -f /run/boot-shot-early.png ] && cp -f /run/boot-shot-early.png $STICK/logs/boot-shot-early.png; [ \$(stat -c %s $STICK/logs/boottime-history.txt 2>/dev/null || echo 0) -lt 200000 ] && cat /run/boottime.txt >> $STICK/logs/boottime-history.txt"
+exit 0

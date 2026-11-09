@@ -1,0 +1,11 @@
+[Unit]
+Description=EO1: resolv.conf from the DHCP lease (networkd has no resolved here)
+
+[Path]
+# PathChanged only: DirectoryNotEmpty fired again after every run (the directory stays non-empty), the service
+# hit its start limit and later DNS changes never reached resolv.conf (found 3 Nov 2026)
+PathChanged=/run/systemd/netif/leases
+Unit=eo1-resolv.service
+
+[Install]
+WantedBy=multi-user.target

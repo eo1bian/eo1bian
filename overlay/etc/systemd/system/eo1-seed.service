@@ -1,0 +1,10 @@
+[Unit]
+Description=EO1: keep a fresh random seed on the boot partition (credited by the initramfs at the next boot)
+After=systemd-random-seed.service eo1-config.service
+
+[Service]
+Nice=19
+Type=oneshot
+ExecStart=/bin/sh -c 'dd if=/dev/urandom of=/run/eo1-seed bs=512 count=1 status=none && eo1-stick-write --put /run/eo1-seed /media/eo1usb/state/random-seed'
+
+# started by eo1-seed.timer (not during the boot)

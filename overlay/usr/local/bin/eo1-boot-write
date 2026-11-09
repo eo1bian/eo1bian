@@ -1,0 +1,47 @@
+#!/bin/sh
+# Replace a boot file (zImage, uInitrd, eo1.dtb, 6x_bootscript, patches/*) on the running medium, wherever it lives:
+#   USB stick: everything on the FAT (/media/eo1usb)
+#   eMMC:      6x_bootscript on the FAT boot partition, the others in /boot of the root partition (read-only
+#              lower of the overlay, mounted at /media/eo1root; remounted writable for a moment)
+#   eo1-boot-write <name> <source-file>        copies source to the right place (keeps <name>.bak)
+#   eo1-boot-write --restore <name>            puts <name>.bak back
+#   eo1-boot-write --path <name>               prints where <name> lives
+set -eu
+name="${2:-}"; src="${3:-}"
+case "$1" in
+	--restore|--path) mode="$1"; name="$2" ;;
+	*) mode=copy; name="$1"; src="$2" ;;
+esac
+on_emmc=0; grep -q "eo1root=" /proc/cmdline && on_emmc=1
+if [ "$on_emmc" = 1 ] && [ "$name" != "6x_bootscript" ] && [ "${name#patches/}" = "$name" ]; then
+	dir=/media/eo1root/boot; fs=lower
+else
+	dir=/media/eo1usb; fs=fat
+fi
+[ "$mode" = "--path" ] && { echo "$dir/$name"; exit 0; }
+do_write() {   # $1 dir, $2 name, $3 src ("" = restore from .bak)
+	# every copy goes to .tmp, is flushed and renamed: a power cut never leaves a truncated 6x_bootscript or
+	# kernel (U-Boot could then boot neither Debian nor the Android fallback), and a failed copy is an error
+	if [ -z "$3" ]; then
+		[ -f "$1/$2.bak" ] || { echo "no $1/$2.bak"; return 1; }
+		cp -f "$1/$2.bak" "$1/$2.tmp" && sync && mv -f "$1/$2.tmp" "$1/$2" && sync
+	else
+		# keep the .bak of the version that last booted: a second write before the trial boot must not
+		# replace it with the untested one
+		if [ -f "$1/$2" ] && ! grep -qx "$2" /media/eo1usb/trial/pending 2>/dev/null; then
+			cp -f "$1/$2" "$1/$2.bak.tmp" && sync && mv -f "$1/$2.bak.tmp" "$1/$2.bak" || return 1
+		fi
+		cp -f "$3" "$1/$2.tmp" && sync && mv -f "$1/$2.tmp" "$1/$2" && sync
+	fi
+}
+[ "$mode" = "--restore" ] && src=""
+if [ "$fs" = fat ]; then
+	# the FAT is read-only: eo1-stick-write makes it writable for the moment; the function is re-declared inside
+	eo1-stick-write sh -c "$(sed -n '/^do_write() {/,/^}/p' "$0"); do_write \"\$1\" \"\$2\" \"\$3\"" _ "$dir" "$name" "$src"
+else
+	mount -o remount,rw /media/eo1root
+	rc=0; do_write "$dir" "$name" "$src" || rc=1
+	mount -o remount,ro /media/eo1root
+	[ "$rc" = 0 ] || { echo "writing $name failed"; exit 1; }
+fi
+echo "$name -> $dir/$name ($(stat -c %s "$dir/$name") bytes)"

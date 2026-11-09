@@ -1,0 +1,3 @@
+# Only the modules listed in /etc/initramfs-tools/modules (plus their dependencies) go into the initramfs:
+# ~8 MB instead of ~30 MB with MODULES=most, which the EO1 loads from the eMMC and unpacks at every boot.
+MODULES=list

@@ -1,0 +1,173 @@
+#!/usr/bin/env python3
+"""The EO1's own Wi-Fi for setting it up from a phone, when it has no network it can join.
+
+  eo1-setup-ap start [message]   scan the networks around, then run an access point "EO1-setup-XXXX" (WPA2,
+                                 an 8-digit code shown on the screen) at 192.168.4.1 with a DHCP server
+                                 (systemd-networkd); the player shows how to join and the setup page's address
+  eo1-setup-ap stop              back to the normal Wi-Fi (wpa_supplicant@wlan0 or NetworkManager)
+  eo1-setup-ap try SSID          stop, wait up to 45 s for SSID; on failure start again with an error message
+
+No extra packages: wpa_supplicant's AP mode (mode=2) on the wl18xx and networkd's DHCPServer=. eo1-netwatch
+starts it when the EO1 has no saved network, or when the saved one has not worked for minutes; the control page
+can start it too. State: /run/eo1-setup-ap.json (ssid, code, url, message) while it runs."""
+import json
+import os
+import random
+import signal
+import subprocess
+import sys
+import time
+
+sys.path.insert(0, "/usr/local/lib/eo1")
+import wifi  # noqa: E402
+
+IFACE = "wlan0"
+STATE = "/run/eo1-setup-ap.json"
+DONE = "/run/eo1-setup-done.json"
+DIR = "/run/eo1-ap"
+NETFILE = "/run/systemd/network/05-eo1-setup-ap.network"
+ADDR = "192.168.4.1"
+
+
+def sh(*cmd, timeout=20):
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout).returncode
+    except Exception:  # noqa: BLE001
+        return 1
+
+
+def poke_player():
+    try:
+        pid = int(subprocess.run(["systemctl", "show", "-p", "MainPID", "--value", "eo1-player"],
+                                 capture_output=True, text=True, timeout=5).stdout.strip() or 0)
+        if pid:
+            os.kill(pid, signal.SIGUSR1)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        pass
+
+
+def ap_pid():
+    try:
+        pid = int(open(DIR + "/wpa.pid").read())
+        os.kill(pid, 0)
+        return pid
+    except (OSError, ValueError):
+        return None
+
+
+def iw_scan():
+    """Scan with iw when wpa_supplicant is not running (no network saved yet)."""
+    try:
+        out = subprocess.run(["/usr/sbin/iw", "dev", IFACE, "scan"], capture_output=True, text=True, timeout=20).stdout
+    except Exception:  # noqa: BLE001
+        return []
+    nets, cur = {}, None
+    for line in out.splitlines():
+        t = line.strip()
+        if line.startswith("BSS "):
+            cur = {"ssid": "", "signal": None, "security": "open"}
+        elif cur is None:
+            continue
+        elif t.startswith("signal:"):
+            try:
+                cur["signal"] = max(0, min(100, 2 * (int(float(t.split()[1])) + 100)))
+            except (ValueError, IndexError):
+                pass
+        elif t.startswith("SSID:"):
+            cur["ssid"] = t[5:].strip()
+        elif t.startswith(("RSN:", "WPA:")):
+            cur["security"] = "wpa"
+        if cur and cur["ssid"] and (cur["ssid"] not in nets or (cur["signal"] or 0) > (nets[cur["ssid"]]["signal"] or 0)):
+            nets[cur["ssid"]] = dict(cur)
+    return sorted(nets.values(), key=lambda n: -(n["signal"] or 0))
+
+
+def start(message=""):
+    os.makedirs(DIR, mode=0o700, exist_ok=True)
+    if ap_pid():
+        st = json.load(open(STATE))
+        st["message"] = message
+        json.dump(st, open(STATE, "w"))
+        poke_player()
+        return
+    # the networks around, for the setup page (an access point cannot scan)
+    nets = []
+    if not os.path.exists("/run/eo1-nm-on"):
+        try:
+            nets = wifi.scan()
+        except Exception:  # noqa: BLE001
+            nets = []
+    if not nets:
+        sh("ip", "link", "set", IFACE, "up")
+        nets = iw_scan()
+    json.dump(nets, open(DIR + "/scan.json", "w"))
+    mac = open("/sys/class/net/%s/address" % IFACE).read().strip().replace(":", "")
+    ssid = "EO1-setup-" + mac[-4:].upper()
+    code = "%08d" % random.SystemRandom().randrange(10 ** 8)
+    sh("systemctl", "stop", "NetworkManager.service", "wpa_supplicant@wlan0.service")
+    with open(DIR + "/wpa.conf", "w") as f:
+        os.chmod(DIR + "/wpa.conf", 0o600)
+        f.write("ctrl_interface=DIR=%s/ctrl\nap_scan=2\nnetwork={\n\tssid=\"%s\"\n\tmode=2\n\tfrequency=2437\n"
+                "\tkey_mgmt=WPA-PSK\n\tproto=RSN\n\tpairwise=CCMP\n\tgroup=CCMP\n\tpsk=\"%s\"\n}\n" % (DIR, ssid, code))
+    os.makedirs(os.path.dirname(NETFILE), exist_ok=True)
+    with open(NETFILE, "w") as f:
+        f.write("[Match]\nName=%s\n\n[Network]\nAddress=%s/24\nDHCPServer=yes\nIPv6AcceptRA=no\n"
+                "LinkLocalAddressing=no\n\n[DHCPServer]\nPoolOffset=10\nPoolSize=40\nEmitDNS=no\nEmitRouter=no\n" % (IFACE, ADDR))
+    sh("ip", "addr", "flush", "dev", IFACE)
+    sh("/sbin/wpa_supplicant", "-B", "-D", "nl80211", "-i", IFACE, "-c", DIR + "/wpa.conf", "-P", DIR + "/wpa.pid")
+    sh("networkctl", "reload")
+    sh("networkctl", "reconfigure", IFACE)
+    url = "http://%s:2324/setup" % ADDR
+    json.dump({"ssid": ssid, "code": code, "url": url, "message": message, "since": time.time()}, open(STATE, "w"))
+    os.chmod(STATE, 0o644)
+    poke_player()
+
+
+def stop():
+    pid = ap_pid()
+    if pid:
+        os.kill(pid, signal.SIGTERM)
+        time.sleep(1)
+    for p in (NETFILE, STATE):
+        try:
+            os.unlink(p)
+        except OSError:
+            pass
+    sh("ip", "addr", "flush", "dev", IFACE)
+    sh("networkctl", "reload")
+    if os.path.exists("/run/eo1-nm-on"):
+        sh("systemctl", "start", "NetworkManager.service")
+    else:
+        sh("systemctl", "restart", "wpa_supplicant@wlan0.service")
+        sh("networkctl", "reconfigure", IFACE)
+    poke_player()
+
+
+def try_network(ssid):
+    """After the setup page saved a network: leave the access point and see whether it connects."""
+    time.sleep(3)                                  # let the setup page get its answer first
+    if os.path.exists("/run/eo1-nm-on"):        # the saved network is now in wpa_supplicant's config
+        os.unlink("/run/eo1-nm-on")
+        sh("systemctl", "stop", "NetworkManager.service")
+    stop()
+    for _ in range(45):
+        time.sleep(1)
+        st = wifi.status() if not os.path.exists("/run/eo1-nm-on") else {}
+        if st.get("connected") and st.get("ip"):
+            json.dump({"ssid": ssid, "ip": st["ip"], "url": "http://%s:2324/" % st["ip"], "at": time.time()},
+                      open(DONE, "w"))
+            poke_player()
+            return
+    start("Could not join %s - check the password and try again" % ssid)
+
+
+if __name__ == "__main__":
+    a = sys.argv[1:] or ["start"]
+    if a[0] == "start":
+        start(" ".join(a[1:]))
+    elif a[0] == "stop":
+        stop()
+    elif a[0] == "try" and len(a) > 1:
+        try_network(a[1])
+    else:
+        sys.exit(__doc__)

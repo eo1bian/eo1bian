@@ -1,0 +1,16 @@
+#!/bin/sh
+# Write /etc/resolv.conf from systemd-networkd's DHCP lease (systemd-resolved is not installed): the DNS
+# servers the router gave, else the default gateway. Run by eo1-resolv.path whenever the leases change.
+dns=""
+for f in /run/systemd/netif/leases/*; do
+	[ -f "$f" ] || continue
+	dns="$dns $(sed -n 's/^DNS=//p' "$f")"
+done
+dns=$(echo $dns)
+[ -n "$dns" ] || dns=$(ip route 2>/dev/null | awk '/^default/ {print $3; exit}')
+[ -n "$dns" ] || exit 0
+{
+	echo "# written by eo1-resolv from the DHCP lease"
+	for d in $dns; do echo "nameserver $d"; done
+} > /etc/resolv.conf.tmp && mv -f /etc/resolv.conf.tmp /etc/resolv.conf
+exit 0

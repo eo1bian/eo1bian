@@ -1,0 +1,192 @@
+#!/bin/sh
+# Apply eo1.txt from the USB stick (editable in Notepad on a PC) before the network starts:
+# hostname, Wi-Fi (NetworkManager keyfile), server URL, rotation, token, GPU.
+# A new Wi-Fi password is moved from eo1.txt into state/wifi.nmconnection on the stick (eo1.txt then says
+# "(saved)"). The root filesystem is a RAM overlay, so the saved profile is copied into NetworkManager at
+# every boot. Writes to the stick go through eo1-stick-write (briefly writable, then read-only again).
+set -u
+STICK=/media/eo1usb
+SRC="$STICK/eo1.txt"
+OUT=/etc/eo1/eo1.conf
+STATE="$STICK/state/wifi.nmconnection"
+NMDIR=/etc/NetworkManager/system-connections
+mkdir -p /etc/eo1 "$NMDIR"
+
+get() {  # get KEY from eo1.txt (CRLF-safe, first match, value after the first "=")
+	[ -f "$SRC" ] || return 0
+	tr -d '\r' < "$SRC" | sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" | head -n 1
+}
+
+SERVER=$(get server)   # empty (normal): the EO1 plays its own gallery and phone uploads
+ROTATE=$(get rotate); [ -n "$ROTATE" ] || ROTATE=90
+TOKEN=$(get token)
+if [ -z "$TOKEN" ]; then
+	# no code in eo1.txt: a random one, made at the first start and kept on the boot partition (state/token);
+	# the screen's QR codes carry it, so nobody has to type it
+	TOKEN=$(tr -d '\r\n' < "$STICK/state/token" 2>/dev/null)
+	if [ -z "$TOKEN" ]; then
+		TOKEN=$(tr -dc 'a-z0-9' < /dev/urandom | head -c 12)
+		printf '%s' "$TOKEN" > /run/eo1-token
+		eo1-stick-write --put /run/eo1-token "$STICK/state/token" || true
+		rm -f /run/eo1-token
+	fi
+fi
+GPU=$(get gpu); [ -n "$GPU" ] || GPU=auto
+HOST=$(get hostname); [ -n "$HOST" ] || HOST=eo1
+KIOSK=$(get kiosk); [ -n "$KIOSK" ] || KIOSK=on
+TRACE=$(get trace); [ -n "$TRACE" ] || TRACE=off
+NETWORK=$(get network); [ -n "$NETWORK" ] || NETWORK=wpa
+PLAYER=$(get player); [ -n "$PLAYER" ] || PLAYER=native
+IPADDR=$(get ip)
+GATEWAY=$(get gateway)
+DNS=$(get dns)
+# time zone: timezone= in eo1.txt, else the one the control page took from the phone (state/timezone), else UTC
+TZONE=$(get timezone)
+[ -n "$TZONE" ] || TZONE=$(tr -d '\r\n' < "$STICK/state/timezone" 2>/dev/null)
+if [ -n "$TZONE" ] && [ -f "/usr/share/zoneinfo/$TZONE" ]; then
+	ln -sf "/usr/share/zoneinfo/$TZONE" /etc/localtime && echo "$TZONE" > /etc/timezone
+fi
+SSID=$(get wifi_ssid)
+PSK=$(get wifi_password)
+# evening/night brightness cap (never above 80 % at night by default, auto brightness included)
+NIGHT=$(get night); [ -n "$NIGHT" ] || NIGHT=19:00-07:00
+NIGHT_MAX=$(get night_max); [ -n "$NIGHT_MAX" ] || NIGHT_MAX=80
+# layers (default: eo1-layers, hardware cross-fades) or classic (eo1-show + eo1-video)
+COMPOSITOR=$(get compositor); [ -n "$COMPOSITOR" ] || COMPOSITOR=layers
+# automatic brightness from the light sensor (off until it is switched on on the control page) and its curve
+AUTOB=$(get auto_brightness); [ -n "$AUTOB" ] || AUTOB=off
+AUTOC=$(get auto_curve); [ -n "$AUTOC" ] || AUTOC=default
+# GitHub gallery (gallery-template/): repo, branch with the EO1 build, and where the player takes items from:
+# auto = the PC server when it answers, else the gallery; server; github
+GHREPO=$(get github_repo)
+GCONF="$STICK/state/gallery.conf"     # written by the agent (app: GitHub gallery), wins over eo1.txt
+gget() { [ -f "$GCONF" ] && sed -n "s/^$1=//p" "$GCONF" | head -n 1; }
+[ -n "$(gget github_repo)" ] && GHREPO=$(gget github_repo)
+GHBRANCH=$(get github_branch); [ -n "$GHBRANCH" ] || GHBRANCH=eo1
+SOURCE=$(get source); [ -n "$(gget source)" ] && SOURCE=$(gget source); [ -n "$SOURCE" ] || SOURCE=auto
+[ -n "$(gget github_branch)" ] && GHBRANCH=$(gget github_branch)
+GHTOKEN=$(get github_token)
+if [ -n "$GHTOKEN" ] && [ "$GHTOKEN" != "(saved)" ] && [ "$GHTOKEN" != "(lagret)" ]; then
+	# a new token: into state/github-token on the boot partition, then eo1.txt says "(saved)"
+	umask 077
+	printf '%s' "$GHTOKEN" > /run/eo1-github-token
+	if eo1-stick-write --put /run/eo1-github-token "$STICK/state/github-token"; then
+		eo1-stick-write sh -c "tr -d '\\r' < '$SRC' | sed 's/^\\([[:space:]]*github_token[[:space:]]*=\\).*/\\1(saved)/' | sed 's/\$/\\r/' > '$SRC.tmp' && sync && mv -f '$SRC.tmp' '$SRC'"
+	fi
+	rm -f /run/eo1-github-token
+	umask 022
+fi
+unset GHTOKEN
+
+cat > "$OUT" <<EOF
+server=$SERVER
+rotate=$ROTATE
+token=$TOKEN
+timezone=$(get timezone)
+gpu=$GPU
+night=$NIGHT
+night_max=$NIGHT_MAX
+compositor=$COMPOSITOR
+auto_brightness=$AUTOB
+auto_curve=$AUTOC
+github_repo=$GHREPO
+github_branch=$GHBRANCH
+source=$SOURCE
+update_repo=$(get update_repo)
+remote_page=$(get remote_page)
+EOF
+chmod 644 "$OUT"
+
+# kiosk switches for bring-up: kiosk=off keeps the browser away, gpu=off renders in software
+rm -f /run/eo1-nokiosk /run/eo1-kiosk.env /run/eo1-trace-on
+[ "$TRACE" = "on" ] && touch /run/eo1-trace-on
+rm -f /run/eo1-nm-on; [ "$NETWORK" = "nm" ] && touch /run/eo1-nm-on
+# player=native (default: eo1-player, DRM + VPU) or player=browser (cage + Chromium + frame.html)
+rm -f /run/eo1-player-native; [ "$PLAYER" != "browser" ] && touch /run/eo1-player-native
+# static address (ip=192.168.1.50/24, gateway=, dns= in eo1.txt): usable the moment Wi-Fi associates, DHCP
+# stays on as well (the lease took 3-4 s after association on this chip)
+if [ -n "$IPADDR" ]; then
+	mkdir -p /etc/systemd/network
+	{
+		echo "[Match]"; echo "Name=wlan0"; echo ""
+		echo "[Network]"; echo "DHCP=ipv4"; echo "IPv6AcceptRA=no"; echo "LinkLocalAddressing=no"
+		echo "Address=$IPADDR"
+		[ -n "$GATEWAY" ] && echo "Gateway=$GATEWAY"
+		for d in $(echo "$DNS" | tr ',' ' '); do echo "DNS=$d"; done
+		echo ""; echo "[DHCPv4]"; echo "UseDNS=yes"; echo "UseHostname=no"; echo "RouteMetric=10"
+	} > /etc/systemd/network/10-wlan0.network
+	printf '%s
+' "# written by eo1-resolv from eo1.txt" > /etc/resolv.conf.eo1
+	for d in $(echo "$DNS" | tr ',' ' '); do echo "nameserver $d" >> /etc/resolv.conf.eo1; done
+	[ -n "$DNS" ] && mv -f /etc/resolv.conf.eo1 /etc/resolv.conf || rm -f /etc/resolv.conf.eo1
+fi
+[ "$KIOSK" = "off" ] && touch /run/eo1-nokiosk
+[ "$GPU" = "off" ] && echo "WLR_RENDERER=pixman" > /run/eo1-kiosk.env
+
+if [ "$(cat /etc/hostname 2>/dev/null)" != "$HOST" ]; then
+	echo "$HOST" > /etc/hostname
+	hostname "$HOST" 2>/dev/null
+	sed -i "s/^127\.0\.1\.1.*/127.0.1.1\t$HOST/" /etc/hosts
+fi
+
+if [ -n "$SSID" ] && [ -n "$PSK" ] && [ "$PSK" != "(saved)" ] && [ "$PSK" != "(lagret)" ]; then
+	umask 077
+	cat > /run/eo1-wifi.nmconnection <<EOF
+[connection]
+id=eo1-wifi
+type=wifi
+autoconnect=true
+autoconnect-priority=10
+
+[wifi]
+mode=infrastructure
+ssid=$SSID
+
+[wifi-security]
+key-mgmt=wpa-psk
+psk=$PSK
+
+[ipv4]
+method=auto
+
+[ipv6]
+method=auto
+EOF
+	eo1-stick-write /usr/local/lib/eo1/save-wifi "$SRC" "$STATE"
+	rm -f /run/eo1-wifi.nmconnection
+	unset PSK
+fi
+
+# every boot: the saved profile goes into NetworkManager (network=nm) or wpa_supplicant@wlan0 (default); the
+# root filesystem starts fresh each time
+if [ -f "$STATE" ]; then
+	umask 077
+	cp -f "$STATE" "$NMDIR/eo1-wifi.nmconnection"
+	chmod 600 "$NMDIR/eo1-wifi.nmconnection"
+	WSSID=$(sed -n 's/^ssid=//p' "$STATE" | head -n 1)
+	mkdir -p /etc/wpa_supplicant
+	# last channel of this network (state/wifi-freq, saved by eo1-wifi-fast): scan only that one at boot,
+	# eo1-wifi-fast drops it again if the frame is not associated within 8 s
+	WFREQ=
+	if [ -f "$STICK/state/wifi-freq" ] && [ "$(sed -n 's/^ssid=//p' "$STICK/state/wifi-freq")" = "$WSSID" ]; then
+		WFREQ=$(sed -n 's/^freq=//p' "$STICK/state/wifi-freq" | tr -cd 0-9)
+	fi
+	# wifi.py writes the config with the SSID as hex and the password as the derived key (wpa_supplicant's
+	# quoted strings take no escapes): any character works, quotes and backslashes included
+	EO1_WIFI_STATE="$STATE" EO1_WIFI_FREQ="$WFREQ" python3 - <<'PYEOF'
+import os
+import sys
+
+sys.path.insert(0, "/usr/local/lib/eo1")
+import wifi
+
+kv = {}
+for line in open(os.environ["EO1_WIFI_STATE"], encoding="utf-8", errors="replace"):
+    line = line.strip()
+    if "=" in line and not line.startswith("["):
+        k, v = line.split("=", 1)
+        kv.setdefault(k, v)
+wifi.write_conf(kv.get("ssid", ""), kv.get("psk") or None, os.environ.get("EO1_WIFI_FREQ") or None)
+PYEOF
+fi
+exit 0

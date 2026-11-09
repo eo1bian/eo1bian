@@ -1,0 +1,12 @@
+[Unit]
+Description=EO1 agent (kiosk HTTP API on port 2324)
+After=eo1-config.service
+
+[Service]
+ExecStart=/usr/bin/python3 /usr/local/lib/eo1/agent.py
+Nice=5
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

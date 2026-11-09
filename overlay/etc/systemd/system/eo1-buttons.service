@@ -1,0 +1,13 @@
+[Unit]
+Description=EO1: capacitive buttons (MPR121 on I2C, read from user space; the Debian kernel has no driver)
+After=eo1-agent.service systemd-modules-load.service
+Wants=eo1-agent.service
+
+[Service]
+ExecStart=/usr/bin/python3 /usr/local/lib/eo1/buttons.py
+Nice=10
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

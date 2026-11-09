@@ -1,0 +1,10 @@
+[Unit]
+Description=EO1: copy the GitHub gallery to the frame (only what is new)
+Requires=media-eo1gallery.mount
+After=media-eo1gallery.mount network-online.target
+
+[Service]
+Type=oneshot
+Nice=10
+ExecStart=/usr/bin/python3 /usr/local/lib/eo1/gallery-sync.py
+TimeoutStartSec=30min

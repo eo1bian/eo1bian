@@ -1,0 +1,35 @@
+# EO1bian - settings. Edit in Notepad and save. Lines starting with # are comments. All are optional.
+#
+# The Wi-Fi network the EO1 connects to. The password is removed from this file automatically
+# once the EO1 has saved it, and replaced by "(saved)".
+wifi_ssid=
+wifi_password=
+
+# Panel rotation: 0, 90, 180 or 270. The EO1 hangs in portrait: 90 (try 270 if the picture is upside down)
+rotate=90
+
+# Access code for the control page. Empty = a random code made at the first start; the QR codes on the EO1's
+# screen carry it, so you never type it (hold the EO1's button 4 seconds to show the QR code again).
+token=
+
+# Troubleshooting only (leave as they are): player=native is EO1bian's own player with hardware video;
+# player=browser shows a web page in Chromium instead (gpu, kiosk: settings for that browser mode)
+gpu=auto
+player=native
+kiosk=on
+
+hostname=eo1
+
+# Fixed IP address (optional): ready the same second Wi-Fi connects; DHCP is used otherwise.
+# Example: ip=192.168.1.50/24, gateway=192.168.1.1, dns=192.168.1.1
+ip=
+gateway=
+dns=
+
+# Network stack: wpa (default, fastest) or nm (NetworkManager)
+network=wpa
+
+# More optional keys (easier set from the control page; see the README): github_repo=you/repo,
+# github_branch=eo1, github_token=..., timezone=Europe/Oslo, auto_brightness=on, auto_curve=default,
+# night=19:00-07:00 and night_max=80 (evening brightness cap, %), update_repo=owner/repo,
+# remote_page=https://you.github.io/eo1-remote/ (your own copy of the live remote page)

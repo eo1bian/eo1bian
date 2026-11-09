@@ -1,0 +1,80 @@
+#!/usr/bin/env python3
+"""Run eo1-install-emmc for the control page and show its progress on the EO1's screen.
+
+Started by the agent (installEmmc) while the EO1 runs from the USB stick. Progress goes to /run/eo1-install.json
+({step, total, text, done, error}), which the player shows as a full-screen card; the full output goes to
+logs/install-<time>.txt on the stick."""
+import json
+import os
+import re
+import signal
+import subprocess
+import time
+
+STATE = "/run/eo1-install.json"
+STEPS = {0: "Saving the Electric Objects art to the stick", 1: "Preparing the internal memory",
+         2: "Copying EO1bian", 3: "Setting up the start-up files", 4: "Finishing"}
+
+
+def poke_player():
+    try:
+        pid = int(subprocess.run(["systemctl", "show", "-p", "MainPID", "--value", "eo1-player"],
+                                 capture_output=True, text=True, timeout=5).stdout.strip() or 0)
+        if pid:
+            os.kill(pid, signal.SIGUSR1)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        pass
+
+
+def write(**st):
+    with open(STATE + ".tmp", "w") as f:
+        json.dump(dict(st, at=time.time()), f)
+    os.replace(STATE + ".tmp", STATE)
+    poke_player()
+
+
+def main():
+    write(step=0, total=4, text="Starting", done=False, error=None)
+    log = []
+    p = subprocess.Popen(["eo1-install-emmc", "--yes"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    for line in p.stdout:
+        log.append(line)
+        m = re.match(r"== (\d)/4", line)
+        if m:
+            n = int(m.group(1))
+            write(step=n, total=4, text=STEPS.get(n, line.strip()), done=False, error=None)
+    rc = p.wait()
+    name = "/run/eo1-install-log.txt"
+    with open(name, "w") as f:
+        f.writelines(log)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    w = subprocess.run(["eo1-stick-write", "--put", name, "/media/eo1usb/logs/install-%s.txt" % stamp],
+                       capture_output=True, text=True)
+    saved = w.returncode == 0 and os.path.ismount("/media/eo1usb")
+    if not saved:
+        log.append("could not save this log on the stick (%d, stick mounted: %s): %s\n"
+                   % (w.returncode, os.path.ismount("/media/eo1usb"), (w.stdout + w.stderr).strip()[-300:]))
+        with open(name, "w") as f:
+            f.writelines(log)
+    # a second copy on the EO1's own boot partition (logs/), so a failed write to the stick never loses it
+    os.makedirs("/mnt/eo1boot", exist_ok=True)
+    if subprocess.run(["mount", "-t", "vfat", "/dev/disk/by-label/BOOT", "/mnt/eo1boot"], capture_output=True).returncode == 0:
+        try:
+            os.makedirs("/mnt/eo1boot/logs", exist_ok=True)
+            with open("/mnt/eo1boot/logs/install-%s.txt" % stamp, "w") as f:
+                f.writelines(log)
+        except OSError:
+            pass
+        subprocess.run(["sync"])
+        subprocess.run(["umount", "/mnt/eo1boot"], capture_output=True)
+    if rc == 0:
+        # how many Electric Objects artworks the rescue saved ("EO art: 17 found, 16 saved, ..."); None = no rescue ran
+        art = next((int(m.group(1)) for m in (re.search(r"EO art: \d+ found, (\d+) saved", l) for l in log) if m), None)
+        write(step=4, total=4, text="Installed", done=True, error=None, art=art)
+    else:
+        tail = "".join(log[-3:]).strip()[-200:]
+        write(step=0, total=4, text="Not installed", done=True, error=tail or "the installer stopped (code %d)" % rc)
+
+
+if __name__ == "__main__":
+    main()

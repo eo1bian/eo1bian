@@ -1,0 +1,83 @@
+#!/bin/sh
+# Install the running Debian (booted from the USB stick) on the EO1's eMMC, without touching U-Boot (SPI-NOR):
+#   mmcblk3p1 (Android's /boot, FAT 20 MB): our 6x_bootscript (Android's kept as 6x_bootscript.android),
+#                                           eo1.txt, state/, patches/, logs/   (= what the stick's FAT held)
+#   mmcblk3p4 (was Android's /data, 2.5 GB): ext4 root (copy of the read-only root image) + /boot/{zImage,uInitrd,eo1.dtb}
+# Android stays on p5 (/system) and boots again with a file /android on p1 or automatically if Debian fails to load.
+# The USB stick always boots first, so it remains the recovery path. Back up p4 before running this.
+#   sudo eo1-install-emmc --yes
+set -eu
+[ "${1:-}" = "--yes" ] || { echo "usage: eo1-install-emmc --yes   (erases partition 4 = Android's /data)"; exit 2; }
+STICK=/media/eo1usb
+LOWER=/media/eo1root
+# the eMMC is mmcblk3 under Debian (usdhc4); partitions by Android label
+P1=/dev/disk/by-label/BOOT
+# never "eo1root": that label belongs to the stick's rootfs.img (loop0) while running from the stick
+P4=$( [ -b /dev/disk/by-label/eo1emmc ] && echo /dev/disk/by-label/eo1emmc || echo /dev/disk/by-label/DATA )
+case "$(readlink -f "$P4")" in /dev/mmcblk*) ;; *) echo "refusing: $P4 -> $(readlink -f "$P4") is not on the eMMC"; exit 1 ;; esac
+case "$(readlink -f "$P1")" in /dev/mmcblk*) ;; *) echo "refusing: $P1 -> $(readlink -f "$P1") is not on the eMMC"; exit 1 ;; esac
+for d in $P1 $P4; do [ -b "$d" ] || { echo "$d missing (eMMC not visible)"; exit 1; }; done
+mountpoint -q "$LOWER" || { echo "$LOWER (read-only root image) not mounted"; exit 1; }
+for f in zImage uInitrd eo1.dtb 6x_bootscript eo1.txt; do [ -f "$STICK/$f" ] || { echo "$STICK/$f missing"; exit 1; }; done
+grep -q "eo1root=" /proc/cmdline && { echo "already running from the eMMC; run this from the USB stick"; exit 1; }
+
+# Android's /data still there: first save the original Electric Objects art from its cache to the stick
+# (eo-art/ next to eo1.txt; read-only on the eMMC). Step 1 erases that partition, so a rescue that could not
+# run or could not write STOPS the install: nothing is changed until the art is safe on the stick.
+if [ "$(basename "$P4")" = DATA ]; then
+	echo "== 0/4 saving the Electric Objects art from Android's cache to the stick"
+	mkdir -p /mnt/android
+	if ! mount -o ro "$P4" /mnt/android 2>/dev/null; then
+		echo "cannot read Android's data partition, so your Electric Objects art cannot be saved first."
+		echo "nothing was changed. Unplug the power, plug it back in, and try Install again."
+		exit 1
+	fi
+	RC=0
+	ART=$(eo1-stick-write python3 /usr/local/lib/eo1/eo-art-rescue.py /mnt/android "$STICK" 2>&1) || RC=$?
+	[ -n "$ART" ] && printf '%s\n' "$ART" | sed 's/^/   /'
+	umount /mnt/android
+	case "$ART" in *"EO art:"*) ;; *) RC=1 ;; esac
+	if [ "$RC" != 0 ]; then
+		echo "could not save the Electric Objects art to the stick (full? write-protected?)."
+		echo "nothing was changed. Make room on the stick and run Install again."
+		exit 1
+	fi
+fi
+
+# the real device from here on: mkfs gives it a new label, so the by-label path stops working
+P4=$(readlink -f "$P4")
+
+echo "== 1/4 root partition $P4 (ext4, U-Boot 2014 compatible features)"
+umount "$P4" 2>/dev/null || true
+mkfs.ext4 -q -F -L eo1emmc -O ^metadata_csum,^64bit,^metadata_csum_seed -E lazy_itable_init=0,lazy_journal_init=0 "$P4"
+mkdir -p /mnt/eo1root && mount "$P4" /mnt/eo1root
+echo "== 2/4 copying the system ($(du -sh "$LOWER" 2>/dev/null | cut -f1)) ..."
+cp -a "$LOWER/." /mnt/eo1root/
+mkdir -p /mnt/eo1root/boot
+cp -f "$STICK/zImage" "$STICK/uInitrd" "$STICK/eo1.dtb" /mnt/eo1root/boot/
+sync
+df -h /mnt/eo1root | tail -1
+
+echo "== 3/4 boot partition $P1 (Android's /boot: our bootscript next to Android's files)"
+mkdir -p /mnt/eo1boot && mount -t vfat -o rw,umask=000 "$P1" /mnt/eo1boot
+[ -f /mnt/eo1boot/6x_bootscript.android ] || cp -f /mnt/eo1boot/6x_bootscript /mnt/eo1boot/6x_bootscript.android
+# write-then-rename (like eo1-boot-write): a power cut here must never leave a truncated bootscript
+cp -f "$STICK/6x_bootscript" /mnt/eo1boot/6x_bootscript.new && sync
+mv -f /mnt/eo1boot/6x_bootscript.new /mnt/eo1boot/6x_bootscript
+cp -f "$STICK/eo1.txt" /mnt/eo1boot/eo1.txt.new && sync
+mv -f /mnt/eo1boot/eo1.txt.new /mnt/eo1boot/eo1.txt
+mkdir -p /mnt/eo1boot/state /mnt/eo1boot/patches /mnt/eo1boot/logs
+cp -rf "$STICK/state/." /mnt/eo1boot/state/
+cp -rf "$STICK/patches/." /mnt/eo1boot/patches/ 2>/dev/null || true
+[ -f "$STICK/ssh/authorized_keys" ] && mkdir -p /mnt/eo1boot/ssh && cp -f "$STICK/ssh/authorized_keys" /mnt/eo1boot/ssh/
+rm -f /mnt/eo1boot/android
+sync
+df -h /mnt/eo1boot | tail -1
+ls -la /mnt/eo1boot
+
+echo "== 4/4 check"
+umount /mnt/eo1boot /mnt/eo1root
+e2fsck -fn "$P4" >/dev/null && echo "root filesystem on $P4 ok"
+fsck.vfat -n "$P1" | tail -n 1
+echo "done: remove the USB stick, then power-cycle the frame to boot Debian from the eMMC."
+echo "      put the stick back in to boot from it again; a file /android on p1 boots Android."

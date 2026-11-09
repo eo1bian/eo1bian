@@ -1,0 +1,155 @@
+#!/usr/bin/env python3
+"""Updates for EO1bian from GitHub releases, tried once and rolled back automatically.
+
+  eo1-update check          {"current", "latest", "available", "notes"} as JSON
+  eo1-update apply          download, verify, stage as a trial boot, reboot
+
+A release carries eo1bian-update.tar (manifest.json, manifest.sig and the files) - made by
+debian/build/make-update.sh. manifest.sig is an ed25519 signature of manifest.json by the project's update key;
+the public half is /usr/share/eo1/update-key.pem, so a release can only come from whoever holds that key.
+manifest.json lists every file with its sha256 and where it goes: "patches/10-eo1.tar.gz" (the runtime files)
+and optionally the boot files (uInitrd, eo1.dtb, zImage, 6x_bootscript). Each is written with eo1-boot-write
+(keeps the previous version as .bak) and listed in trial/pending: at the next boot eo1-trial accepts the update
+when the EO1 shows pictures and has a network, or restores every file and reboots once.
+The channel is /usr/share/eo1/update-repo (owner/name of the GitHub repository), or update_repo= in eo1.txt
+(owner/name, or the http(s) URL of a JSON in the shape of GitHub's releases/latest, e.g. on your own server)."""
+import hashlib
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tarfile
+import urllib.request
+
+KEY = "/usr/share/eo1/update-key.pem"
+VERSION_FILE = "/etc/eo1bian-version"
+WORK = "/run/eo1-update"
+STICK = "/media/eo1usb"
+ALLOWED = ("patches/10-eo1.tar.gz", "uInitrd", "eo1.dtb", "zImage", "6x_bootscript")
+
+
+def current():
+    try:
+        return open(VERSION_FILE).read().strip()
+    except OSError:
+        return "0"
+
+
+def channel():
+    if os.environ.get("EO1_UPDATE_CHANNEL"):
+        return os.environ["EO1_UPDATE_CHANNEL"]
+    try:
+        for line in open("/etc/eo1/eo1.conf", encoding="utf-8"):
+            if line.startswith("update_repo=") and line.strip().split("=", 1)[1]:
+                return line.strip().split("=", 1)[1]
+    except OSError:
+        pass
+    try:
+        return open("/usr/share/eo1/update-repo").read().strip()
+    except OSError:
+        return ""
+
+
+def vtuple(v):
+    out = []
+    for p in v.lstrip("v").replace("-", ".").split("."):
+        out.append(int(p) if p.isdigit() else -1)   # 1.0.0-rc < 1.0.0 is not needed; pre-releases are skipped
+    return tuple(out)
+
+
+def latest():
+    repo = channel()
+    if not repo:
+        raise RuntimeError("no update channel set")
+    url = repo if repo.startswith(("http://", "https://")) else "https://api.github.com/repos/%s/releases/latest" % repo
+    req = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json", "User-Agent": "eo1bian"})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        rel = json.load(r)
+    asset = next((a for a in rel.get("assets", []) if a["name"] == "eo1bian-update.tar"), None)
+    return rel.get("tag_name", ""), rel.get("body", "") or "", asset
+
+
+def check():
+    tag, notes, asset = latest()
+    cur = current()
+    return {"current": cur, "latest": tag, "available": bool(asset) and vtuple(tag) > vtuple(cur),
+            "notes": notes[:2000]}
+
+
+def sha256(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for b in iter(lambda: f.read(1 << 20), b""):
+            h.update(b)
+    return h.hexdigest()
+
+
+def apply():
+    st = check()
+    if not st["available"]:
+        return {"ok": False, "message": "Already up to date (%s)" % st["current"]}
+    if os.path.exists(STICK + "/trial/pending"):
+        return {"ok": False, "message": "A trial boot is still pending; restart the EO1 first"}
+    _, _, asset = latest()
+    shutil.rmtree(WORK, ignore_errors=True)
+    os.makedirs(WORK)
+    tar = os.path.join(WORK, "u.tar")
+    req = urllib.request.Request(asset["browser_download_url"], headers={"User-Agent": "eo1bian"})
+    with urllib.request.urlopen(req, timeout=60) as r, open(tar, "wb") as f:
+        shutil.copyfileobj(r, f)
+    with tarfile.open(tar) as t:
+        for m in t.getmembers():                  # only the known names: nothing may land outside WORK
+            if m.isdir() and m.name.rstrip("/") == "patches":
+                continue
+            if not m.isfile() or m.name not in ("manifest.json", "manifest.sig") + ALLOWED:
+                raise RuntimeError("unexpected file in the update: " + m.name)
+        t.extractall(WORK)
+    man, sig = os.path.join(WORK, "manifest.json"), os.path.join(WORK, "manifest.sig")
+    r = subprocess.run(["openssl", "pkeyutl", "-verify", "-pubin", "-inkey", KEY, "-rawin", "-in", man,
+                        "-sigfile", sig], capture_output=True, text=True)
+    if r.returncode:
+        raise RuntimeError("the update's signature is not valid")
+    m = json.load(open(man))
+    if m.get("version") != st["latest"]:
+        raise RuntimeError("the update's version does not match the release")
+    staged = []
+    for name, digest in m["files"].items():
+        if name not in ALLOWED:
+            raise RuntimeError("unexpected file in the manifest: " + name)
+        p = os.path.join(WORK, name)
+        if sha256(p) != digest:
+            raise RuntimeError("checksum mismatch: " + name)
+        staged.append(name)
+    if not os.path.ismount(STICK):
+        raise RuntimeError("the boot partition is not mounted: not updating")
+    # the rollback is armed BEFORE the first boot file is replaced: a power cut in the middle then restores
+    # every .bak at the next boot (eo1-trial) instead of leaving a mix of old and new files behind
+    with open("/run/eo1-pending", "w") as f:
+        f.write("\n".join(staged) + "\n")
+    r = subprocess.run(["eo1-stick-write", "--put", "/run/eo1-pending", STICK + "/trial/pending"],
+                       capture_output=True, text=True)
+    if r.returncode or not os.path.isfile(STICK + "/trial/pending"):
+        raise RuntimeError("could not arm the automatic rollback on the boot partition: not updating")
+    for name in staged:                           # previous versions kept as .bak by eo1-boot-write
+        r = subprocess.run(["eo1-boot-write", name, os.path.join(WORK, name)], capture_output=True, text=True)
+        if r.returncode:
+            raise RuntimeError("writing %s failed: %s" % (name, r.stdout + r.stderr))
+    with open("/run/eo1-update-note", "w") as f:
+        f.write("%s -> %s\n" % (st["current"], m["version"]))
+    subprocess.run(["eo1-stick-write", "sh", "-c", "echo \"$(date) update %s -> %s staged\" >> %s/logs/trial.txt"
+                    % (st["current"], m["version"], STICK)])
+    subprocess.Popen(["sh", "-c", "sleep 3; systemctl reboot"], start_new_session=True)
+    return {"ok": True, "message": "Updating to %s: the EO1 restarts now" % m["version"]}
+
+
+if __name__ == "__main__":
+    a = sys.argv[1:] or ["check"]
+    try:
+        out = check() if a[0] == "check" else apply() if a[0] == "apply" else None
+        if out is None:
+            sys.exit(__doc__)
+        print(json.dumps(out))
+    except Exception as e:  # noqa: BLE001
+        print(json.dumps({"ok": False, "error": str(e)}))
+        sys.exit(1)

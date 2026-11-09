@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#14110f">
+<title>EO1 setup</title>
+<style>
+  :root { --bg: #14110f; --card: #1f1a17; --line: #3a312b; --text: #f3ece4; --dim: #a89c90; --accent: #f0a24a; --ink: #1b1209; --bad: #e5675a; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+         padding: max(16px, env(safe-area-inset-top)) 16px 32px; }
+  main { max-width: 480px; margin: 0 auto; display: grid; gap: 14px; }
+  h1 { font-size: 24px; margin: 6px 0 0; }
+  .muted { color: var(--dim); font-size: 14px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 14px; display: grid; gap: 10px; }
+  .net { display: flex; justify-content: space-between; gap: 10px; width: 100%; text-align: left; padding: 12px; border-radius: 12px;
+         border: 1px solid var(--line); background: #2a231e; color: var(--text); font: inherit; cursor: pointer; }
+  .net.on { outline: 2px solid var(--accent); }
+  input { width: 100%; padding: 12px; border-radius: 12px; border: 1px solid var(--line); background: #2a231e; color: var(--text); font: inherit; }
+  button.go { width: 100%; padding: 14px; border-radius: 12px; border: 0; background: var(--accent); color: var(--ink); font: inherit; font-weight: 700; }
+  #msg { min-height: 1.4em; }
+  #msg.bad { color: var(--bad); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Set up this EO1</h1>
+  <div class="muted">Pick your home Wi-Fi. The EO1 works with 2.4 GHz networks using WPA2 (not WPA3-only networks).</div>
+  <section class="card">
+    <div id="nets" class="muted">Looking…</div>
+  </section>
+  <section class="card">
+    <label for="ssid">Network name</label>
+    <input id="ssid" autocomplete="off" autocapitalize="off" spellcheck="false">
+    <label for="psk">Password</label>
+    <input id="psk" type="password" autocomplete="off">
+    <button class="go" onclick="go()">Connect</button>
+    <div id="msg" class="muted"></div>
+  </section>
+</main>
+<script>
+const T = new URLSearchParams(location.hash.slice(1)).get('token') || 'eo1';
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
+async function call(c, p = {}) {
+  // everything in the POST body: the Wi-Fi password must never be in a URL
+  let r;
+  try { r = await fetch('/', {method: 'POST', body: new URLSearchParams({cmd: c, token: T, ...p})}); }
+  catch (e) { throw new Error('No contact with the EO1 - are you still on its setup Wi-Fi?'); }
+  const j = await r.json().catch(() => ({statustext: r.statusText}));
+  if (!r.ok) throw new Error(j.statustext || r.status);
+  return j;
+}
+function bars(s) { return s >= 75 ? '▂▄▆█' : s >= 50 ? '▂▄▆' : s >= 25 ? '▂▄' : '▂'; }
+async function nets() {
+  try {
+    const j = await call('setupScan');
+    const list = j.networks || [];
+    $('nets').innerHTML = list.length ? list.map(n => `<button class="net" data-ssid="${esc(n.ssid)}">` +
+      `<span>${esc(n.ssid)}</span><span class="muted">${n.security === 'open' ? '' : '🔒 '}${bars(n.signal || 0)}</span></button>`).join('')
+      : 'No networks yet - scanning again… You can also type the name below.';
+    if (!list.length && (nets.tries = (nets.tries || 0) + 1) < 20) setTimeout(nets, 4000);
+    document.querySelectorAll('.net').forEach(b => b.onclick = () => {
+      document.querySelectorAll('.net').forEach(x => x.classList.toggle('on', x === b));
+      $('ssid').value = b.dataset.ssid; $('psk').focus();
+    });
+  } catch (e) { $('nets').textContent = 'Type the network name below.'; }
+}
+async function go() {
+  const ssid = $('ssid').value.trim(), psk = $('psk').value;
+  $('msg').className = 'muted';
+  if (!ssid) { $('msg').textContent = 'Enter a network name.'; return; }
+  if (psk && psk.length < 8) { $('msg').className = 'bad'; $('msg').textContent = 'The password must be at least 8 characters.'; return; }
+  try {
+    await call('setupWifi', {ssid, psk});
+    $('msg').textContent = 'Connecting… Your phone will lose this setup Wi-Fi now. Watch the EO1\'s screen: ' +
+      'it shows the address of its control page when it is connected, or this setup again if it could not join.';
+  } catch (e) { $('msg').className = 'bad'; $('msg').textContent = e.message; }
+}
+nets();
+</script>
+</body>
+</html>

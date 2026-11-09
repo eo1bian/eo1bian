@@ -1,0 +1,36 @@
+#!/bin/sh
+# Trial boot with automatic rollback for boot files changed over SSH or by eo1-update (uInitrd, eo1.dtb, zImage,
+# 6x_bootscript, patches/10-eo1.tar.gz). Accepted only when the picture side is up and there is a network.
+# Stage: eo1-boot-write <name> <new-file> (keeps <name>.bak), then list the names in trial/pending on the FAT
+# (boot partition / stick), one per line. At the next boot this waits up to 3 minutes for the server (falls back
+# to the gateway). Success: the trial is accepted (pending removed). Failure: every listed file is restored from
+# its .bak with eo1-boot-write --restore and the frame reboots once.
+STICK=/media/eo1usb
+T="$STICK/trial"
+[ -f "$T/pending" ] || exit 0
+SERVER=$(sed -n 's/^server=//p' /etc/eo1/eo1.conf 2>/dev/null)
+HOST=$(echo "$SERVER" | sed -n 's#^[a-z]*://\([^/]*\).*#\1#p')
+shows() {  # the picture side is up: the native player names an item, or the kiosk browser has DevTools on 9222
+	if [ -e /run/eo1-player-native ]; then
+		systemctl -q is-active eo1-player && grep -q '"showing"' /run/eo1-player.json 2>/dev/null
+	else
+		curl -s -m 2 -o /dev/null http://127.0.0.1:9222/json
+	fi
+}
+i=0
+while [ $i -lt 36 ]; do
+	# accepted only when the server answers AND the picture side is up
+	if [ -n "$HOST" ] && curl -s -m 4 -o /dev/null "http://$HOST/healthz" && shows; then ok=1; break; fi
+	gw=$(ip route | awk '/^default/ {print $3; exit}')
+	if [ -n "$gw" ] && ping -c1 -W2 "$gw" >/dev/null 2>&1 && [ $i -ge 24 ] && shows; then ok=1; break; fi
+	sleep 5; i=$((i + 1))
+done
+if [ "${ok:-0}" = 1 ]; then
+	eo1-stick-write sh -c "rm -f $T/pending; echo \"\$(date) trial boot accepted\" >> $STICK/logs/trial.txt"
+	exit 0
+fi
+for n in $(cat "$T/pending"); do
+	eo1-boot-write --restore "$n" || true
+done
+eo1-stick-write sh -c "rm -f $T/pending; echo \"\$(date) trial boot FAILED, previous boot files restored\" >> $STICK/logs/trial.txt"
+systemctl reboot

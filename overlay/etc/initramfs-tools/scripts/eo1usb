@@ -1,0 +1,265 @@
+# initramfs-tools boot script, selected with "boot=eo1usb" on the kernel command line.
+# EO1 Debian on a USB stick: the stick is plain FAT32 (editable from Windows); the root filesystem is a file on
+# it (/rootfs.img, ext4) mounted through a loop device.
+#
+# Power-cut safe: the FAT and the ext4 image are mounted READ-ONLY, and the root is an overlay with a RAM upper
+# layer (tmpfs), so pulling the plug never leaves a half-written stick (Windows refuses to read a FAT that
+# Linux had open read-write when the power went). Programs that must store something on the stick (logs,
+# saved Wi-Fi) use eo1-stick-write, which makes it writable for a moment, syncs and makes it read-only again.
+# Fallback if overlayfs is missing: root image read-write as before (/run/eo1-mode = rw).
+# Kernel options: eo1dev=/dev/sdXN  eo1img=/rootfs.img  eo1wait=<s>  eo1rw (force the read-write mode)
+#   eo1root=/dev/mmcblk0pN  root on a real ext4 partition (Debian installed on the eMMC) instead of the loop image;
+#   eo1dev is then the FAT partition with eo1.txt/state/patches (the eMMC boot partition).
+# Nothing on the frame's eMMC (Android) is touched.
+
+eo1_log()
+{
+	echo "eo1usb: $*"
+	echo "$(cut -d' ' -f1 /proc/uptime)s $*" >> /run/eo1-initramfs.txt
+}
+
+# SSH login key from the stick (ssh/authorized_keys on the FAT, written from a PC): placed in the RAM layer
+# with the ownership and modes sshd insists on (FAT files have neither). Lets the image's built-in key be
+# replaced without rebuilding rootfs.img.
+# An ext4 that was written in a read-write boot and lost power before unmounting has an unreplayed journal
+# (incompat flag RECOVER, 0x4, at byte 96 of the superblock at 1024). The read-only mount below uses noload,
+# which would ignore it, so replay it first with one read-write mount. $1 = device or image file.
+eo1_needs_recovery()
+{
+	b=$(dd if="$1" bs=1 skip=1120 count=1 2>/dev/null | od -An -tu1 | tr -d ' ')
+	[ -n "$b" ] && [ $((b & 4)) -ne 0 ]
+}
+
+eo1_replay_journal()
+{
+	eo1_needs_recovery "$1" || return 0
+	eo1_log "root has an unreplayed journal (power cut during a read-write boot): replaying it"
+	mkdir -p /eo1replay
+	if [ -b "$1" ]; then
+		mount -t ext4 -o rw "$1" /eo1replay && umount /eo1replay
+	else
+		mount -o remount,rw /eo1usb && mount -t ext4 -o loop,rw "$1" /eo1replay && umount /eo1replay
+		mount -o remount,ro /eo1usb
+	fi
+	eo1_needs_recovery "$1" && eo1_log "journal replay failed: mounting without it" || eo1_log "journal replayed"
+	return 0
+}
+
+# The video decoder's firmware (NXP's vpu_fw_imx6*.bin) is not ours to give away, but every EO1 has it in its
+# own Android system partition (SYSTEM, p5, kept by EO1bian): copied from there into the new root (the RAM
+# layer) at every boot, before udev loads the coda driver. Read-only on the eMMC. $1 = the root to put it in.
+# Always under usr/lib: /lib is a symlink to usr/lib (merged /usr), and a real lib/ directory in the RAM layer
+# would hide it, and the dynamic loader with it - nothing could start, not even systemd.
+eo1_vpu_firmware()
+{
+	[ -f "$1/usr/lib/firmware/vpu/vpu_fw_imx6q.bin" ] && return 0
+	[ -f /eo1lower/usr/lib/firmware/vpu/vpu_fw_imx6q.bin ] && return 0
+	sys=/dev/disk/by-label/SYSTEM
+	[ -b "$sys" ] || return 0
+	mkdir -p /eo1android
+	mount -t ext4 -o ro,noload "$sys" /eo1android 2>/dev/null || return 0
+	if [ -f /eo1android/lib/firmware/vpu/vpu_fw_imx6q.bin ]; then
+		mkdir -p "$1/usr/lib/firmware/vpu"
+		cp /eo1android/lib/firmware/vpu/vpu_fw_imx6*.bin "$1/usr/lib/firmware/vpu/"
+		cp /eo1android/lib/firmware/vpu/vpu_fw_imx6*.bin "$1/usr/lib/firmware/"
+		eo1_log "video decoder firmware taken from the EO1's own Android system"
+	fi
+	umount /eo1android
+	return 0
+}
+
+eo1_inject_ssh()
+{
+	k=/eo1usb/ssh/authorized_keys
+	[ -s "$k" ] || return 0
+	umask 022
+	mkdir -p "$1/home/eo1/.ssh"
+	# sshd (StrictModes) silently ignores the key if /home or the home directory is group/world writable
+	chown 0:0 "$1/home"
+	chmod 755 "$1/home"
+	tr -d '\r' < "$k" > "$1/home/eo1/.ssh/authorized_keys"
+	chown 1000:1000 "$1/home/eo1" "$1/home/eo1/.ssh" "$1/home/eo1/.ssh/authorized_keys"
+	chmod 755 "$1/home/eo1"
+	chmod 700 "$1/home/eo1/.ssh"
+	chmod 600 "$1/home/eo1/.ssh/authorized_keys"
+	eo1_log "ssh key taken from the stick"
+	return 0
+}
+
+# Updates without rebuilding rootfs.img: every patches/*.tar.gz on the stick (sorted by name, made with
+# numeric root ownership) is unpacked into the RAM layer at boot. Written over SSH with eo1-stick-write.
+eo1_apply_patches()
+{
+	for p in /eo1usb/patches/*.tar.gz; do
+		[ -f "$p" ] || continue
+		if tar -xzf "$p" -C "$1"; then
+			eo1_log "patch applied: ${p##*/}"
+		else
+			eo1_log "patch FAILED: ${p##*/}"
+		fi
+	done
+	chmod 755 "$1"
+	return 0
+}
+
+# Display as early as possible: the imx-drm modules are loaded while the USB stick is still enumerating, then
+# the last picture (state/splash.fb.gz = raw RGB565 1920x1080, written by eo1-agent) goes straight to fb0.
+# With "quiet" and no console on tty0 nothing overwrites it until cage takes over the display.
+eo1_display_start()
+{
+	for m in imxdrm imx-ipu-v3 imx-ldb dw-hdmi-imx parallel-display panel-simple pwm-bl pwm-imx27; do
+		modprobe -q "$m" 2>/dev/null
+	done
+	return 0
+}
+
+eo1_splash()
+{
+	f=/eo1usb/state/splash.fb.gz
+	if [ ! -f "$f" ] && grep -q "console=tty0" /proc/cmdline; then
+		# debug.txt (console on the panel) and no splash yet: light the panel so the messages can be read
+		j=0; while [ $j -lt 50 ] && ! ls /sys/class/backlight/* >/dev/null 2>&1; do sleep 0.1; j=$((j + 1)); done
+		for b in /sys/class/backlight/*; do
+			cat "$b/max_brightness" > "$b/brightness" 2>/dev/null
+			echo 0 > "$b/bl_power" 2>/dev/null
+		done
+	fi
+	[ -f "$f" ] || return 0
+	i=0
+	while [ $i -lt 40 ] && [ ! -e /dev/fb0 ]; do sleep 0.1; i=$((i + 1)); done
+	[ -e /dev/fb0 ] || { eo1_log "no fb0 for the splash"; return 0; }
+	if zcat "$f" > /dev/fb0 2>/dev/null; then
+		eo1_log "splash drawn on fb0 at $(cut -d' ' -f1 /proc/uptime)s"
+		# the same picture, upright 32-bit, for the patched cage (its background until the browser paints)
+		# (in the background: the 8 MB unpack cost 0.7 s on the critical path; cage comes ~12 s later)
+		[ -f /eo1usb/state/splash.rgba.gz ] && ( zcat /eo1usb/state/splash.rgba.gz > /run/splash.rgba.tmp 2>/dev/null && mv -f /run/splash.rgba.tmp /run/splash.rgba ) &
+		# the panel's backlight is off after a cold boot until someone switches it on: do it now, with the picture
+		for b in /sys/class/backlight/*; do
+			[ -d "$b" ] || continue
+			cat "$b/max_brightness" > "$b/brightness" 2>/dev/null
+			echo 0 > "$b/bl_power" 2>/dev/null
+		done
+	else
+		eo1_log "splash failed"
+	fi
+	return 0
+}
+
+mountroot()
+{
+	dev=""
+	img="/rootfs.img"
+	rootdev=""
+	wait=120
+	mode=ro
+	for x in $(cat /proc/cmdline); do
+		case $x in
+			eo1dev=*) dev="${x#eo1dev=}" ;;
+			eo1img=*) img="${x#eo1img=}" ;;
+			eo1root=*) rootdev="${x#eo1root=}" ;;
+			eo1wait=*) wait="${x#eo1wait=}" ;;
+			eo1rw) mode=rw ;;
+		esac
+	done
+
+	eo1_log "mountroot start"
+	if [ -n "$rootdev" ]; then
+		# root on the eMMC: no USB in the initramfs (the OTG controller + enumeration cost ~3 s); the main
+		# system loads the USB drivers later for a stick or keyboard
+		for m in sdhci-esdhc-imx mmc_block vfat nls_cp437 nls_ascii nls_iso8859_1 nls_utf8 ext4 overlay; do
+			modprobe -q "$m" 2>/dev/null
+		done
+	else
+		for m in ci_hdrc_imx usbmisc_imx phy_mxs_usb usb_storage uas sd_mod vfat nls_cp437 nls_ascii nls_iso8859_1 nls_utf8 loop ext4 overlay; do
+			modprobe -q "$m" 2>/dev/null
+		done
+	fi
+	eo1_log "modules loaded"
+	# display and Wi-Fi modules load in the background while the USB stick enumerates (both take ~2 s)
+	( eo1_display_start; modprobe -q wlcore_sdio 2>/dev/null; modprobe -q wl12xx 2>/dev/null ) &
+
+	i=0
+	while [ $i -lt "$wait" ]; do
+		if [ -n "$dev" ]; then
+			[ -b "$dev" ] && break
+		else
+			for d in /dev/sda1 /dev/sdb1 /dev/sdc1 /dev/sda /dev/sdb; do
+				if [ -b "$d" ]; then dev="$d"; break 2; fi
+			done
+		fi
+		sleep 1
+		i=$((i + 1))
+	done
+	[ -n "$dev" ] && [ -b "$dev" ] || panic "eo1usb: no USB stick found after ${wait} s"
+	# a whole disk was found first: give its partition table a moment and prefer partition 1
+	case "$dev" in
+		/dev/sd[a-z])
+			j=0
+			while [ $j -lt 5 ] && [ ! -b "${dev}1" ]; do sleep 1; j=$((j + 1)); done
+			[ -b "${dev}1" ] && dev="${dev}1"
+			;;
+	esac
+	eo1_log "config partition $dev found after ${i}s"
+
+	[ -d /sys/module/overlay ] || grep -qw overlay /proc/filesystems || mode=rw
+	mkdir -p /eo1usb
+	if [ "$mode" = "ro" ]; then
+		mount -t vfat -o ro,noatime,utf8,umask=077 "$dev" /eo1usb || panic "eo1usb: cannot mount $dev"
+	else
+		mount -t vfat -o rw,noatime,flush,utf8,umask=077 "$dev" /eo1usb || panic "eo1usb: cannot mount $dev"
+	fi
+	# entropy: the saved seed is fed to the kernel RNG with credit right now, so nothing waits for the pool
+	# (systemd-random-seed waited ~2 s for "crng init done" on this board without it)
+	if [ -s /eo1usb/state/random-seed ] && [ -x /sbin/eo1-seed-credit ]; then
+		/sbin/eo1-seed-credit /eo1usb/state/random-seed >/dev/null 2>&1 && eo1_log "entropy credited from state/random-seed"
+	fi
+	if [ -n "$rootdev" ]; then
+		j=0
+		while [ $j -lt 20 ] && [ ! -b "$rootdev" ]; do sleep 0.5; j=$((j + 1)); done
+		[ -b "$rootdev" ] || panic "eo1usb: root device $rootdev not found"
+		lower="$rootdev"
+	else
+		[ -f "/eo1usb$img" ] || panic "eo1usb: $img not found on the stick"
+		lower="/eo1usb$img"
+	fi
+	eo1_splash
+
+	if [ "$mode" = "ro" ]; then
+		mkdir -p /eo1lower /eo1rw
+		eo1_replay_journal "$lower"
+		# noload: no journal replay (it would need to write; done just above when needed); never written here
+		if { [ -n "$rootdev" ] && mount -t ext4 -o ro,noload "$rootdev" /eo1lower || mount -t ext4 -o loop,ro,noload "/eo1usb$img" /eo1lower; } &&
+			mount -t tmpfs -o mode=0755,size=256M eo1rw /eo1rw &&
+			mkdir -p /eo1rw/upper /eo1rw/work &&
+			chmod 755 /eo1rw/upper &&
+			eo1_apply_patches /eo1rw/upper &&
+			eo1_inject_ssh /eo1rw/upper &&
+			eo1_vpu_firmware /eo1rw/upper &&
+			mount -t overlay -o lowerdir=/eo1lower,upperdir=/eo1rw/upper,workdir=/eo1rw/work eo1root "${rootmnt}"; then
+			eo1_log "root = $lower (read-only) + RAM overlay"
+		else
+			eo1_log "overlay failed, falling back to read-write root"
+			umount /eo1lower 2>/dev/null; umount /eo1rw 2>/dev/null
+			mount -o remount,rw,flush /eo1usb
+			mode=rw
+		fi
+	fi
+	if [ "$mode" = "rw" ]; then
+		if [ -n "$rootdev" ]; then
+			mount -t ext4 -o rw,noatime "$rootdev" "${rootmnt}" || panic "eo1usb: cannot mount $rootdev"
+		else
+			mount -t ext4 -o loop,rw,noatime "/eo1usb$img" "${rootmnt}" || panic "eo1usb: cannot mount $img"
+		fi
+		eo1_log "root = $lower (read-write)"
+	fi
+	echo "$mode" > /run/eo1-mode
+
+	mkdir -p "${rootmnt}/media/eo1usb"
+	mount -o move /eo1usb "${rootmnt}/media/eo1usb" || mount --move /eo1usb "${rootmnt}/media/eo1usb"
+	if [ "$mode" = "ro" ]; then
+		mkdir -p "${rootmnt}/media/eo1root"
+		mount -o move /eo1lower "${rootmnt}/media/eo1root" 2>/dev/null || true
+	fi
+	wait   # the background unpack of the cage background must finish before /run moves to the real root
+	eo1_log "handing over to systemd"
+}

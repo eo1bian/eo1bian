@@ -1,0 +1,24 @@
+[Unit]
+Description=EO1 native player (DRM + VPU: pictures with cross-fades, video; instead of cage + Chromium)
+# player=native in eo1.txt (default); eo1-config creates the flag. player=browser runs eo1-kiosk instead.
+ConditionPathExists=/run/eo1-player-native
+# a player that dies at once must keep retrying every 2 s - never give up and leave the panel frozen
+StartLimitIntervalSec=0
+# no network needed to start: it shows state/last.jpg at once and polls the server when Wi-Fi is up
+DefaultDependencies=no
+After=eo1-config.service local-fs.target
+Wants=eo1-config.service
+
+[Service]
+# player-start picks player-layers.py (eo1-layers) or player.py (compositor=classic in eo1.txt)
+ExecStart=/usr/local/lib/eo1/player-start
+Restart=always
+RestartSec=2
+# the main loop pings the watchdog every poll (<= 30 s); a fade, the end of a video pass or a video download
+# can hold it for up to ~2.5 min. Stuck longer = hung: systemd restarts the player.
+WatchdogSec=300
+NotifyAccess=main
+Nice=-5
+
+[Install]
+WantedBy=sysinit.target

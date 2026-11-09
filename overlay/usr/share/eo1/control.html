@@ -1,0 +1,661 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#14110f">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="EO1">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icon.png">
+<title>EO1</title>
+<style>
+  :root {
+    --bg: #14110f; --card: #1f1a17; --line: #3a312b; --text: #f3ece4; --dim: #a89c90;
+    --accent: #f0a24a; --accent-ink: #1b1209; --danger: #e5675a; --ok: #7bc67e;
+  }
+  * { box-sizing: border-box; }
+  @font-face { font-family: "EO Inter"; src: url(/fonts/Inter-Medium.ttf); font-display: swap; }
+  @font-face { font-family: "EO Jost"; src: url(/fonts/Jost-Medium.ttf); font-display: swap; }
+  @font-face { font-family: "EO Fraunces"; src: url(/fonts/Fraunces-Soft.ttf); font-display: swap; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+         padding: max(16px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom)); }
+  main { max-width: 520px; margin: 0 auto; display: grid; gap: 14px; }
+  header { display: flex; align-items: baseline; justify-content: space-between; }
+  h1 { font-size: 22px; margin: 0; letter-spacing: .02em; }
+  .muted { color: var(--dim); font-size: 13px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 14px; display: grid; gap: 12px; }
+  .now { display: grid; grid-template-columns: 96px 1fr; gap: 14px; align-items: center; }
+  .now img { width: 96px; aspect-ratio: 9/16; object-fit: cover; border-radius: 10px; background: #000; }
+  .now .title { font-weight: 600; font-size: 17px; }
+  .row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  button, .file { appearance: none; border: 1px solid var(--line); background: #2a231e; color: var(--text); border-radius: 12px;
+                  padding: 14px 10px; font: inherit; font-weight: 600; min-height: 52px; cursor: pointer; text-align: center; }
+  button:active, .file:active { transform: scale(.98); }
+  button.primary, .file { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  button.on { outline: 2px solid var(--accent); }
+  input[type=range] { width: 100%; accent-color: var(--accent); height: 32px; }
+  label.line { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+  .switch { display: flex; gap: 8px; }
+  .switch button { flex: 1; min-height: 44px; padding: 10px; font-weight: 500; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .thumb { position: relative; }
+  .thumb img { width: 100%; aspect-ratio: 9/16; object-fit: cover; border-radius: 8px; display: block; background: #000; }
+  .thumb button { position: absolute; top: 6px; right: 6px; min-height: 0; padding: 4px 9px; border-radius: 999px;
+                  background: rgba(0,0,0,.65); color: #fff; border: 0; font-size: 14px; }
+  .file input { display: none; }
+  .now img { cursor: zoom-in; }
+  #big { position: fixed; inset: 0; background: #000; display: none; align-items: center; justify-content: center;
+         z-index: 10; cursor: zoom-out; }
+  #big.open { display: flex; }
+  #big img { max-width: 100vw; max-height: 100vh; object-fit: contain; }
+  #big span { position: absolute; top: max(14px, env(safe-area-inset-top)); right: 16px; color: #fff; opacity: .7; font-size: 14px; }
+  .thumb.is-hidden img { opacity: .3; filter: grayscale(1); }
+  .thumb .hidden-tag { position: absolute; left: 6px; bottom: 6px; font-size: 11px; background: rgba(0,0,0,.7); color: var(--text);
+                       padding: 2px 6px; border-radius: 6px; text-transform: uppercase; letter-spacing: .04em; }
+  .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .tile { background: #2a231e; border-radius: 12px; padding: 10px 6px; text-align: center; }
+  .tile b { display: block; font-size: 17px; }
+  .tile span { font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: .04em; }
+  .range { display: grid; grid-template-columns: 74px 1fr 52px; align-items: center; gap: 8px; font-size: 14px; }
+  .range span:last-child { text-align: right; color: var(--dim); }
+  .times { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 15px; }
+  .text-in { width: 100%; background: #2a231e; color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: 12px; font: inherit; }
+  .times input[type=time] { background: #2a231e; color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: 8px; font: inherit; }
+  select { background: #2a231e; color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: 10px; font: inherit; width: 100%; }
+  #toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: #000; color: #fff; padding: 10px 16px;
+           border-radius: 999px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; max-width: 90vw; }
+  #toast.show { opacity: .92; }
+  .status { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 14px; }
+  .status dt { color: var(--dim); }
+  .status dd { margin: 0; }
+  .sheet { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 8px; }
+  .sheet button { position: relative; aspect-ratio: 9/16; min-height: 0; padding: 0; border-radius: 8px;
+                  background-repeat: no-repeat; border: 2px solid transparent; }
+  .sheet button.on, .sheet button.pick { border-color: var(--accent); }
+  .sheet button.pick::after { content: ""; position: absolute; inset: 0; margin: auto; width: 26px; height: 26px;
+                              border-radius: 50%; border: 3px solid rgba(255,255,255,.3); border-top-color: #fff;
+                              animation: sheetspin .8s linear infinite; }
+  @keyframes sheetspin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<main>
+  <header><h1>EO1</h1><span class="muted" id="clock"></span></header>
+
+  <section class="card" id="installcard" style="display:none;border-color:var(--accent)">
+    <label class="line"><span>Recommended: install on this EO1</span><span class="muted">from the USB stick</span></label>
+    <div>Copies EO1bian to the EO1's own memory: faster start, and you can remove the stick.</div>
+    <div class="muted">It cannot brick the EO1: the part that starts it is never written, and it always starts from a USB
+      stick first, so this stick brings it back at any time. Android is kept on the EO1 (only its old data area is reused,
+      like a factory reset), and your old Electric Objects art is copied to the stick first.</div>
+    <button id="instbtn" class="primary" onclick="installEmmc()">Install</button>
+    <div id="instart" style="display:none;color:var(--accent);font-weight:600"></div>
+  </section>
+
+  <section class="card now">
+    <img id="shot" alt="" onclick="openBig()">
+    <div>
+      <div class="muted">Now showing</div>
+      <div class="title" id="title">…</div>
+      <div class="muted" id="source"></div>
+      <button id="hidebtn" style="margin-top:10px;min-height:40px;padding:8px 12px;font-weight:500" onclick="hideNow()">Hide this</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="row">
+      <button onclick="cmd('prev')">◀ Previous</button>
+      <button id="screenbtn" onclick="toggleScreen()">Screen</button>
+      <button onclick="cmd('next')">Next ▶</button>
+    </div>
+  </section>
+
+  <section class="card" id="livecard">
+    <label class="line"><span>Live from anywhere</span><span class="muted" id="livestate"></span></label>
+    <div id="liveoff">
+      <div style="font-size:17px;font-weight:600;margin-bottom:6px">Use your EO1 away from home too</div>
+      <div class="muted" style="margin-bottom:12px">This page only works on your home Wi-Fi. The live remote shows what this
+        EO1 shows and changes pictures, brightness and the screen from anywhere, on mobile data too: no account, no
+        app, free. It goes through ntfy.zap.pm, a free ntfy server for EO1bian frames with no daily limit, encrypted
+        end to end, so it only carries scrambled bytes.</div>
+      <button class="primary" style="width:100%" onclick="liveRemote('pair')">Set up the live remote</button>
+    </div>
+    <div id="liveon" style="display:none;gap:10px">
+      <a class="file" id="liveopen" style="display:block;text-decoration:none">Open the remote on this phone</a>
+      <div class="muted">Another phone: scan this. Keep it to yourself: the code is the key to this EO1's remote.</div>
+      <img id="liveqr" alt="" style="width:180px;height:180px;margin:0 auto;display:block;background:#fff;border-radius:8px;image-rendering:pixelated">
+      <div class="switch"><button onclick="liveRemote('pair')">New key</button><button onclick="liveRemote('off')">Turn off</button></div>
+      <div class="muted">A new key disconnects the phones that have the old one.</div>
+    </div>
+    <details style="margin-top:4px">
+      <summary class="muted" style="cursor:pointer">Another ntfy server (optional)</summary>
+      <div class="muted" style="margin:8px 0">Ready to use: ntfy.zap.pm, hosted free for EO1bian frames by speville,
+        the maker of EO1bian. Prefer the public ntfy.sh (a daily message limit per home network) or your own ntfy
+        server (reachable over https from wherever your phone is)? Up to you. Now: <b id="liveserver">ntfy.zap.pm</b></div>
+      <div class="switch"><button onclick="liveServer(this, 'https://ntfy.zap.pm')">ntfy.zap.pm (default)</button>
+        <button onclick="liveServer(this, 'https://ntfy.sh')">ntfy.sh</button></div>
+      <div style="display:flex;gap:8px;margin-top:8px"><input id="ntfyserver" placeholder="https://ntfy.example.com" style="flex:1" inputmode="url">
+        <button onclick="liveServer(this)">Use</button></div>
+      <input id="ntfytoken" placeholder="Access token, if your server has one (tk_...)" style="margin-top:8px;width:100%"
+        autocomplete="off" autocapitalize="off" spellcheck="false">
+    </details>
+  </section>
+
+  <section class="card" id="albumcard" style="display:none">
+    <label class="line"><span>Albums</span><span class="muted" id="albumnow"></span></label>
+    <div id="albumlist" style="display:grid;gap:8px"></div>
+    <button id="albumall" onclick="setAlbums([])">Play all albums mixed</button>
+    <div class="muted" style="margin-top:6px">To pick a picture:</div>
+    <div style="display:flex;gap:8px"><select id="browsealbum" style="flex:1" onchange="if (browseOpen) browse()"></select>
+      <button id="browsebtn" style="min-height:44px;padding:8px 14px" onclick="browseToggle()">Show pictures</button></div>
+    <div class="muted" id="sheetmsg"></div>
+    <div class="sheet" id="sheet"></div>
+  </section>
+
+  <section class="card">
+    <label class="line"><span>Brightness</span><span class="muted" id="brv"></span></label>
+    <input type="range" id="br" min="1" max="255" oninput="brv.textContent = brLabel(this.value)" onchange="setBr(this.value)">
+    <div class="switch">
+      <button id="auto-off" onclick="auto(false)">Manual</button>
+      <button id="auto-on" onclick="auto(true)">Automatic</button>
+    </div>
+    <div id="autorange" style="display:none;margin-top:12px;gap:6px">
+      <label class="range"><span>Minimum</span><input type="range" id="amin" min="0" max="100" oninput="amin_v.textContent = this.value + ' %'" onchange="autoRange()"><span id="amin_v"></span></label>
+      <label class="range"><span>Maximum</span><input type="range" id="amax" min="1" max="100" oninput="amax_v.textContent = this.value + ' %'" onchange="autoRange()"><span id="amax_v"></span></label>
+      <label class="range"><span>Adjust</span><input type="range" id="aoff" min="-50" max="50" oninput="aoff_v.textContent = (this.value > 0 ? '+' : '') + this.value + ' %'" onchange="autoRange()"><span id="aoff_v"></span></label>
+    </div>
+    <div class="muted" id="brnote"></div>
+  </section>
+
+  <section class="card">
+    <label class="line"><span>Schedule</span><span class="muted">the screen sleeps, the slideshow waits</span></label>
+    <div class="switch">
+      <button id="sch-off" onclick="cmd('schedule', {enabled: 'off'})">Off</button>
+      <button id="sch-on" onclick="saveSchedule(true)">On</button>
+    </div>
+    <div class="times" style="margin-top:10px">Off from <input type="time" id="off1" value="23:00" onchange="saveSchedule()"> to <input type="time" id="on1" value="07:00" onchange="saveSchedule()"></div>
+    <div class="times" id="win2" style="margin-top:8px;display:none">and from <input type="time" id="off2" onchange="saveSchedule()"> to <input type="time" id="on2" onchange="saveSchedule()"> <button style="min-height:36px;padding:6px 10px" onclick="$('off2').value = $('on2').value = ''; saveSchedule()">✕</button></div>
+    <button id="addwin" style="margin-top:8px;min-height:40px;padding:8px 12px;font-weight:500" onclick="$('win2').style.display = ''; this.style.display = 'none'">＋ Second time</button>
+  </section>
+
+  <section class="card">
+    <label class="line"><span>Each picture</span><span class="muted">in the EO1's own slideshow</span></label>
+    <select id="interval" onchange="cmd('interval', {value: this.value})">
+      <option value="0">As set in the gallery</option><option value="30">30 seconds</option><option value="60">1 minute</option>
+      <option value="120">2 minutes</option><option value="300">5 minutes</option><option value="900">15 minutes</option>
+      <option value="1800">30 minutes</option><option value="3600">1 hour</option><option value="10800">3 hours</option>
+      <option value="21600">6 hours</option><option value="43200">12 hours</option><option value="86400">1 day</option>
+      <option value="keep">Keep this picture</option>
+    </select>
+    <div class="switch">
+      <button id="shuf-off" onclick="cmd('shuffle', {value: 'off'})">In order</button>
+      <button id="shuf-on" onclick="cmd('shuffle', {value: 'on'})">Shuffle</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <label class="line"><span>Titles</span><span class="muted">centred at the bottom, like a museum label</span></label>
+    <div class="switch">
+      <button id="titles-off" onclick="cmd('titles', {value: 'off'})">Off</button>
+      <button id="titles-on" onclick="cmd('titles', {value: 'on'})">On</button>
+    </div>
+    <div class="switch" id="fontrow">
+      <button id="font-sans" onclick="cmd('titles', {font: 'sans'})" style="font-family: 'EO Inter', system-ui, sans-serif">Modern</button>
+      <button id="font-eo" onclick="cmd('titles', {font: 'eo'})" style="font-family: 'EO Jost', system-ui, sans-serif">EO style</button>
+      <button id="font-serif" onclick="cmd('titles', {font: 'serif'})" style="font-family: 'EO Fraunces', Georgia, serif">Classic</button>
+    </div>
+    <label class="line"><span>Around pictures</span><span class="muted">when a picture does not fill the screen</span></label>
+    <div class="switch">
+      <button id="edges-blur" onclick="cmd('titles', {edges: 'blur'})">Blur</button>
+      <button id="edges-mat" onclick="cmd('titles', {edges: 'mat'})">Mat</button>
+      <button id="edges-black" onclick="cmd('titles', {edges: 'black'})">Black</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <label class="line"><span>Your pictures on EO1</span><span class="muted" id="upcount"></span></label>
+    <label class="file">＋ Add pictures<input type="file" accept="image/*" multiple onchange="upload(this.files, this)"></label>
+    <div class="grid" id="uploads"></div>
+  </section>
+
+  <section class="card" id="hiddencard" style="display:none">
+    <label class="line"><span>Hidden</span><span class="muted" id="hiddencount"></span></label>
+    <div id="hiddenlist" style="display:grid;gap:8px"></div>
+  </section>
+
+  <section class="card">
+    <label class="line"><span>GitHub gallery</span><span class="muted" id="ghnow"></span></label>
+    <div class="muted">Your own pictures and videos from a private GitHub repository made from gallery-template
+      (also the way to show your rescued Electric Objects art again; see the README).</div>
+    <input class="text-in" id="ghrepo" placeholder="you/eo1-gallery" autocomplete="off" autocapitalize="off" spellcheck="false">
+    <input class="text-in" id="ghtoken" type="password" placeholder="read-only access token (github_pat_...)" autocomplete="off">
+    <button onclick="saveGallery(this)">Save</button>
+  </section>
+
+  <section class="card">
+    <label class="line"><span>Remote access</span><span class="muted" id="tsstate"></span></label>
+    <div id="tsoff">
+      <div class="muted" style="margin-bottom:10px">This page from anywhere, live, with the free Tailscale app on your phone:
+        a private link between your phone and this EO1, nothing opened on your router.</div>
+      <button onclick="remoteAccess('on', this)">Turn on</button>
+    </div>
+    <div id="tslogin" style="display:none;gap:10px">
+      <div>Sign in to Tailscale for this EO1 (a free account; Google, Apple, Microsoft or GitHub):</div>
+      <a class="file" id="tslink" target="_blank" rel="noopener" style="display:block;text-decoration:none">Sign in to Tailscale</a>
+      <div class="muted">Then install the Tailscale app on your phone and sign in with the same account.</div>
+    </div>
+    <div id="tson" style="display:none;gap:10px">
+      <div>On as <b id="tsname"></b>. Away from home, with Tailscale on in the phone:</div>
+      <a class="file" id="tsopen" style="display:block;text-decoration:none">Open this page through Tailscale</a>
+      <div class="muted">Add that page to your home screen too. Next, previous and the live picture work as at home.</div>
+      <div class="switch"><button onclick="remoteAccess('off', this)">Turn off</button><button onclick="remoteAccess('forget', this)">Sign out</button></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <label class="line"><span>Connect a computer</span><span class="muted">SSH, scripts, AI assistants</span></label>
+    <div id="pairidle"><button onclick="pairStart()">Connect a computer</button></div>
+    <div id="pairbox" style="display:none;gap:10px">
+      <div style="text-align:center;font:700 40px/1.1 ui-monospace,Consolas,monospace;letter-spacing:.3em" id="paircode"></div>
+      <div class="muted" style="text-align:center" id="pairexp"></div>
+      <div><b>Easiest:</b> on the computer, open a web browser, go to <b id="pairurl"></b> and type the code there.</div>
+      <div><b>Or</b> type one line:</div>
+      <div class="muted">Windows (PowerShell)<br><code id="pairwin" style="white-space:nowrap;color:var(--text)"></code></div>
+      <div class="muted">Mac / Linux (Terminal)<br><code id="pairmac" style="white-space:nowrap;color:var(--text)"></code></div>
+      <button class="ghost" id="pairshare" onclick="pairShare()" style="display:none">Send to my computer…</button>
+    </div>
+    <div id="pairkeys" class="muted"></div>
+  </section>
+
+  <section class="card">
+    <label class="line"><span>Software</span><span class="muted" id="ver"></span></label>
+    <button id="updbtn" onclick="checkUpdate()">Check for updates</button>
+    <div class="muted" id="updnote"></div>
+  </section>
+
+  <section class="card">
+    <div class="tiles" id="tiles"></div>
+    <dl class="status" id="status" style="margin-top:12px"></dl>
+  </section>
+</main>
+<div id="big" onclick="closeBig()"><img id="bigimg" alt=""><span>Tap to close</span></div>
+<div id="toast"></div>
+<script>
+// The frame's own control page (served by eo1-agent on port 2324). Works with mobile + frame on the same
+// network, with or without internet.
+const T = new URLSearchParams(location.hash.slice(1)).get('token') || localStorage.getItem('eo1token') || 'eo1';
+localStorage.setItem('eo1token', T);
+const $ = id => document.getElementById(id);
+let st = {};
+
+function toast(msg, ms = 2200) { const t = $('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toast.h); toast.h = setTimeout(() => t.classList.remove('show'), ms); }
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+function pct(v) { return Math.round(v / 255 * 100) + ' %'; }
+let nightCap = 255;
+// above the evening/night limit the panel stays at the limit: say so right at the slider
+function brLabel(v) { return +v > nightCap ? pct(nightCap) + ' · night limit' : pct(v); }
+async function call(c, params = {}, method = 'GET') {
+  const q = new URLSearchParams({cmd: c, token: T, ...params});
+  let r;
+  try { r = await fetch('/?' + q, {method}); }
+  catch (e) { throw new Error('No contact with the EO1. Is your phone on the same Wi-Fi?'); }
+  const j = await r.json().catch(() => ({statustext: r.statusText}));
+  if (!r.ok) throw new Error(j.statustext || r.status);
+  return j;
+}
+async function cmd(c, p) { try { const j = await call(c, p); toast(j.statustext); setTimeout(refresh, 900); } catch (e) { toast(e.message); } }
+function toggleScreen() { cmd(st.screenOn ? 'screenOff' : 'screenOn'); }
+function setBr(v) { cmd('setBrightness', {value: v}); }
+let liveShown = null;
+let albumsOn = [];
+async function setAlbums(list) {
+  try { const j = await call('albums', {value: list.length ? JSON.stringify(list) : 'all'}); toast(j.statustext); setTimeout(refresh, 900); }
+  catch (e) { toast(e.message); }
+  if (list.length === 1 && $('browsealbum').value !== list[0]) {  // the picture browser follows the album you chose
+    $('browsealbum').value = list[0]; $('sheet').innerHTML = ''; $('sheetmsg').textContent = '';
+    if (browseOpen) browse();
+  }
+}
+// the picture browser: open next time if you had it open, otherwise only on a tap
+let browseOpen = false, browseAuto = false, sheetFor = '';
+try { browseOpen = localStorage.getItem('eo1browse') === '1'; } catch (e) {}
+function browseToggle() {
+  browseOpen = !browseOpen; browseAuto = true;                    // opened by hand: no second automatic opening
+  try { localStorage.setItem('eo1browse', browseOpen ? '1' : '0'); } catch (e) {}
+  if (browseOpen) browse();
+  else { $('sheet').innerHTML = ''; $('sheetmsg').textContent = ''; $('browsebtn').textContent = 'Show pictures'; sheetFor = ''; }
+}
+async function browse() {
+  const album = $('browsealbum').value;
+  if (!album) return;
+  $('browsebtn').textContent = 'Hide pictures';
+  $('sheetmsg').textContent = 'Loading the pictures...'; $('sheet').innerHTML = '';
+  try {
+    const sh = await call('albumSheet', {album});
+    if ($('browsealbum').value !== album || !browseOpen) return;   // changed meanwhile
+    const url = 'data:image/jpeg;base64,' + sh.img, rows = Math.ceil(sh.items.length / sh.cols);
+    const esc = s => String(s).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+    $('sheet').innerHTML = sh.items.map((it, n) => {
+      const x = (n % sh.cols) * 100 / Math.max(1, sh.cols - 1), y = rows > 1 ? Math.floor(n / sh.cols) * 100 / (rows - 1) : 0;
+      return `<button data-id="${esc(it.id)}" title="${esc(it.title)}" aria-label="${esc(it.title || 'picture')}"
+        style="background-image:url(${url});background-size:${sh.cols * 100}% ${rows * 100}%;background-position:${x}% ${y}%"
+        onclick="pick(this)"></button>`;
+    }).join('');
+    sheetFor = album;
+    $('sheetmsg').textContent = sh.items.length + ' pictures in ' + album + '. Tap one to show it.';
+    markSheet();
+  } catch (e) { $('sheetmsg').textContent = e.message; }
+}
+async function pick(b) {
+  document.querySelectorAll('#sheet button').forEach(x => x.classList.toggle('pick', x === b));
+  $('sheetmsg').textContent = 'Showing it on the EO1...';
+  try { await call('show', {id: b.dataset.id}); }
+  catch (e) { b.classList.remove('pick'); $('sheetmsg').textContent = e.message; return; }
+  for (let i = 0; i < 10; i++) {                                  // the cross-fade takes a few seconds
+    await new Promise(r => setTimeout(r, 1000));
+    try { st = await call('status'); render(); } catch (e) {}
+    if ((st.showing || {}).id === b.dataset.id) break;
+  }
+  b.classList.remove('pick');
+}
+function markSheet() {
+  const id = (st.showing || {}).id;
+  let on = null;
+  document.querySelectorAll('#sheet button').forEach(x => { x.classList.toggle('on', x.dataset.id === id); if (x.dataset.id === id) on = x; });
+  if (on && sheetFor) $('sheetmsg').textContent = 'Now on the EO1: ' + (on.title || 'this picture') + '. Tap another to show it.';
+}
+function toggleAlbum(key) {
+  const s = new Set(albumsOn); s.has(key) ? s.delete(key) : s.add(key); setAlbums([...s]);
+}
+function showAlbums(st) {
+  const list = st.albums || [];
+  albumsOn = st.albumsOn || [];
+  $('albumcard').style.display = list.length ? '' : 'none';
+  $('albumnow').textContent = albumsOn.length ? 'playing ' + albumsOn.length + ' of ' + list.length : 'playing all';
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+  $('albumlist').innerHTML = list.map(a => {
+    const on = !albumsOn.length || albumsOn.includes(a.key);
+    const k = esc(JSON.stringify(a.key));
+    return `<div class="line" style="display:flex;align-items:center;gap:8px">
+      <button class="${on ? 'on' : ''}" style="flex:1;text-align:left;min-height:48px" onclick='toggleAlbum(${k})'>
+        ${on ? '&#10003; ' : ''}${esc(a.name)} <span class="muted">${a.count}${a.hidden ? ', ' + a.hidden + ' hidden' : ''}</span>
+        <div class="muted" style="font-weight:400">${{github: 'from your GitHub gallery, kept on this EO1', server: 'from a server, kept on this EO1',
+          phone: 'uploaded from your phone, stored on this EO1'}[a.source] || ''}</div></button>
+      <button style="min-height:48px;padding:8px 12px;font-weight:500" onclick='setAlbums([${k}])'>Only this</button></div>`;
+  }).join('');
+  $('albumall').style.display = albumsOn.length ? '' : 'none';
+  const sel = $('browsealbum'), keep = sel.value;
+  sel.innerHTML = list.map(a => `<option value="${esc(a.key)}">${esc(a.name)} (${a.count})</option>`).join('');
+  if (keep && list.some(a => a.key === keep)) sel.value = keep;
+  else if (albumsOn.length === 1) sel.value = albumsOn[0];
+  if (browseOpen && !browseAuto && sel.value) { browseAuto = true; browse(); }
+  markSheet();
+}
+async function liveServer(btn, preset) {
+  // pairing again on another ntfy server: a new key too, so phones open the new link once.
+  // preset: a ready-made address (no token); otherwise the typed address and token
+  const server = (preset || $('ntfyserver').value).trim().replace(/\/+$/, ''), token = preset ? '' : $('ntfytoken').value.trim();
+  if (!server) { toast('An https:// address, e.g. https://ntfy.example.com'); return; }
+  if (server && !/^https:\/\/[A-Za-z0-9.-]+(:\d+)?(\/[A-Za-z0-9._\/-]*)?$/.test(server)) { toast('An https:// address, e.g. https://ntfy.example.com'); return; }
+  if (token && (!server || !/^[A-Za-z0-9_-]{8,80}$/.test(token))) { toast(server ? 'The token looks like tk_ and letters' : 'The token goes with a server address'); return; }
+  if (!confirm('Use ' + server.replace(/^https:\/\//, '') + '? Phones open the new link once (a new key).')) return;
+  const old = btn.textContent; btn.disabled = true; btn.textContent = 'Working…';
+  const p = {value: 'pair', server};
+  if (token) p.ntfytoken = token;
+  try { const j = await call('liveRemote', p); toast(j.statustext); liveShown = null; $('ntfytoken').value = ''; showLive(j.liveRemote); }
+  catch (e) { toast(e.message); }
+  btn.disabled = false; btn.textContent = old;
+}
+async function liveRemote(v) {
+  if (v === 'pair' && liveShown && !confirm('Make a new key? Phones with the old one stop working until you open the new link on them.')) return;
+  if (v === 'off' && !confirm('Turn the live remote off?')) return;
+  try { const j = await call('liveRemote', {value: v}); toast(j.statustext); showLive(j.liveRemote); } catch (e) { toast(e.message); }
+}
+async function showLive(r) {
+  r = r || {paired: false};
+  $('livestate').textContent = r.paired ? (r.watching ? 'a phone is watching' : 'on') : 'off';
+  $('liveserver').textContent = (r.server || 'https://ntfy.zap.pm').replace(/^https:\/\//, '') + (r.token ? ' (with a token)' : '');
+  $('liveoff').style.display = r.paired ? 'none' : '';
+  $('livecard').style.borderColor = r.paired ? '' : 'var(--accent)';   // stands out until it is set up
+  $('liveon').style.display = r.paired ? 'grid' : 'none';
+  if (r.paired && liveShown !== (r.link || liveShown || 'x')) {
+    try {
+      const j = r.link ? r : (await call('liveRemote', {value: 'link'})).liveRemote;
+      liveShown = j.link;
+      $('liveopen').href = j.link;
+      $('liveqr').src = '/?cmd=liveRemote&value=link&qr=1&token=' + T + '&k=' + encodeURIComponent(j.link.slice(-8));
+    } catch (e) {}
+  }
+  if (!r.paired) liveShown = null;
+}
+async function remoteAccess(v, btn) {
+  if (v === 'forget' && !confirm('Sign this EO1 out of Tailscale? Turning it on again needs a new sign-in.')) return;
+  const old = btn && btn.textContent;
+  if (btn) { btn.disabled = true; btn.textContent = v === 'on' ? 'Starting…' : 'Working…'; }
+  try { const j = await call('remoteAccess', {value: v}); toast(j.statustext); showRemote(j.remote); } catch (e) { toast(e.message); }
+  if (btn) { btn.disabled = false; btn.textContent = old; }
+}
+function showRemote(r) {
+  r = r || {state: 'off'};
+  $('tsstate').textContent = {off: 'off', starting: 'starting...', login: 'waiting for sign-in', on: 'on'}[r.state] || '';
+  $('tsoff').style.display = r.state === 'off' ? '' : 'none';
+  $('tslogin').style.display = r.state === 'login' || r.state === 'starting' ? 'grid' : 'none';
+  $('tson').style.display = r.state === 'on' ? 'grid' : 'none';
+  if (r.authUrl) $('tslink').href = r.authUrl;
+  if (r.state === 'on') {
+    $('tsname').textContent = r.name || r.ip;
+    $('tsopen').href = 'http://' + (r.name || r.ip) + ':2324/#token=' + T;
+  }
+}
+async function saveGallery(btn) {
+  // POST with the token in the body: it must never be in a URL
+  const body = new URLSearchParams({cmd: 'gallery', token: T, repo: $('ghrepo').value.trim(), github_token: $('ghtoken').value.trim()});
+  const old = btn && btn.textContent;
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+  try {
+    const r = await fetch('/', {method: 'POST', body});
+    const j = await r.json().catch(() => ({statustext: r.statusText}));
+    toast(j.statustext); if (r.ok) { $('ghtoken').value = ''; setTimeout(refresh, 900); }
+  } catch (e) { toast('No contact with the EO1. Is your phone on the same Wi-Fi?'); }
+  if (btn) { btn.disabled = false; btn.textContent = old; }
+}
+let pairTimer = null, pairInfo = null;
+async function pairStart() {
+  try {
+    const j = await call('pairStart');
+    pairInfo = j;
+    $('paircode').textContent = j.code;
+    $('pairurl').textContent = j.pcUrl.replace('http://', '');
+    $('pairwin').textContent = j.commands.windows;
+    $('pairmac').textContent = j.commands.mac;
+    $('pairshare').style.display = navigator.share ? '' : 'none';
+    $('pairbox').style.display = 'grid'; $('pairidle').style.display = 'none';
+    clearInterval(pairTimer);
+    pairTimer = setInterval(() => {
+      const left = Math.round(j.expires - Date.now() / 1000);
+      if (left <= 0) { clearInterval(pairTimer); $('pairbox').style.display = 'none'; $('pairidle').style.display = ''; loadKeys(); return; }
+      $('pairexp').textContent = 'valid for ' + Math.floor(left / 60) + ':' + String(left % 60).padStart(2, '0') + ', once';
+    }, 1000);
+  } catch (e) { toast(e.message); }
+}
+function pairShare() {
+  if (!pairInfo) return;
+  navigator.share({title: 'Connect to my EO1', text: 'Open ' + pairInfo.pcUrl + ' and type ' + pairInfo.code +
+    '\nor run: ' + pairInfo.commands.windows + '  (Windows)  /  ' + pairInfo.commands.mac + '  (Mac, Linux)'}).catch(() => {});
+}
+async function loadKeys() {
+  try {
+    const j = await call('sshKeys');
+    const ks = j.keys || [];
+    $('pairkeys').innerHTML = ks.length ? 'Connected: ' + ks.map((k, i) => `${k.name.replace(/</g, '&lt;')} <button style="min-height:32px;padding:4px 10px;font-weight:500" onclick="pairRemove(${i})">Remove</button>`).join(' · ')
+      + (j.sshOn ? '' : ' (SSH is off)') : 'No computer connected; SSH is off.';
+  } catch (e) {}
+}
+async function pairRemove(i) { if (!confirm('Remove this computer?')) return; await cmd('sshRemove', {index: i}); setTimeout(loadKeys, 800); }
+async function installEmmc() {
+  if (!confirm('Install EO1bian on this EO1? It takes about 10 minutes. Keep the power and the stick in.')) return;
+  try { const j = await call('installEmmc', {value: 'start', confirm: 'yes'}); toast(j.statustext); refresh(); }
+  catch (e) { toast(e.message); }
+}
+async function checkUpdate() {
+  const b = $('updbtn');
+  if (b.dataset.apply) {
+    if (!confirm('Install ' + b.dataset.apply + '? The EO1 restarts, and goes back to this version by itself if the new one does not work.')) return;
+    b.disabled = true; toast('Downloading…');
+    try { const j = await call('update', {value: 'apply'}); toast(j.statustext); $('updnote').textContent = j.statustext; }
+    catch (e) { toast(e.message); b.disabled = false; }
+    return;
+  }
+  b.disabled = true;
+  try {
+    const j = await call('update', {value: 'check'});
+    $('updnote').textContent = j.statustext;
+    if (j.available) { b.dataset.apply = j.latest; b.textContent = 'Install ' + j.latest; b.classList.add('primary'); }
+  } catch (e) { $('updnote').textContent = e.message; }
+  b.disabled = false;
+}
+function auto(on) { cmd('autoBrightness', {value: on ? 'on' : 'off'}); }
+function autoRange() { cmd('autoBrightness', {min: $('amin').value, max: $('amax').value, offset: $('aoff').value}); }
+function saveSchedule(enable) {
+  const p = {off: $('off1').value, on: $('on1').value, off2: $('off2').value, on2: $('on2').value};
+  if (enable) p.enabled = 'on';
+  cmd('schedule', p);
+}
+let editing = false;   // a time field or slider in use: do not overwrite it with the status
+document.addEventListener('focusin', e => { if (e.target.matches('input, select')) editing = true; });
+document.addEventListener('focusout', () => { editing = false; });
+let sliding = null;    // the slider under a finger (iOS does not focus range inputs on touch)
+document.addEventListener('pointerdown', e => { if (e.target.matches('input[type=range]')) sliding = e.target; }, true);
+document.addEventListener('pointerup', () => { setTimeout(() => { sliding = null; }, 500); }, true);
+document.addEventListener('pointercancel', () => { setTimeout(() => { sliding = null; }, 500); }, true);
+
+async function upload(files, input) {
+  const list = [...files];
+  if (input) input.disabled = true;
+  let i = 0;
+  for (const f of list) {
+    i++;
+    toast('Uploading ' + (list.length > 1 ? i + '/' + list.length + ': ' : '') + f.name + ' …', 120000);
+    try {
+      const r = await fetch('/upload?' + new URLSearchParams({token: T, name: f.name}), {method: 'POST', body: f});
+      const j = await r.json();
+      toast(r.ok ? 'Added: ' + j.upload.title : j.statustext);
+    } catch (e) { toast('No contact with the EO1. Is your phone on the same Wi-Fi?'); }
+  }
+  if (input) { input.disabled = false; input.value = ''; }
+  refresh();
+}
+async function hideNow() {
+  const s = st.showing || {};
+  if (!String(s.id || '').startsWith('local-')) { toast('Only gallery pictures can be hidden here'); return; }
+  cmd('hide', {id: s.id, title: s.title || ''});
+}
+function unhide(id) { cmd('unhide', {id}); }
+async function delUpload(id) {
+  if (!confirm('Remove this picture from EO1?')) return;
+  cmd('deleteUpload', {id});
+}
+
+function render() {
+  const s = st.showing || {};
+  $('title').textContent = s.title || (s.showing === 'blank' ? 'Black screen' : '–');
+  // a server is only mentioned when one is set up (eo1.txt server=); normally: the GitHub gallery or this EO1
+  $('source').textContent = !st.serverSet ? (st.githubRepo ? 'Source: GitHub gallery' : 'Source: this EO1')
+    : {github: 'Source: GitHub gallery', server: 'Source: server', auto: 'Source: server (gallery when it is away)'}[st.source] || '';
+  $('screenbtn').textContent = st.screenOn ? 'Screen off' : 'Screen on';
+  $('screenbtn').classList.toggle('primary', !st.screenOn);
+  if (document.activeElement !== $('br') && sliding !== $('br')) { $('br').value = st.wanted || st.brightness || 128; $('brv').textContent = brLabel($('br').value); }
+  $('auto-on').classList.toggle('on', !!st.auto); $('auto-off').classList.toggle('on', !st.auto);
+  $('autorange').style.display = st.auto ? 'grid' : 'none';
+  if (!editing && !sliding) {
+    $('amin').value = st.autoMin ?? 2; $('amax').value = st.autoMax ?? 100; $('aoff').value = st.autoOffset ?? 0;
+    for (const k of ['amin', 'amax', 'aoff']) $(k).dispatchEvent(new Event('input'));
+    const sch = st.schedule || {}, w = sch.windows || [];
+    $('sch-on').classList.toggle('on', !!sch.enabled); $('sch-off').classList.toggle('on', !sch.enabled);
+    if (w[0]) { $('off1').value = w[0].off; $('on1').value = w[0].on; }
+    $('off2').value = w[1] ? w[1].off : ''; $('on2').value = w[1] ? w[1].on : '';
+    $('win2').style.display = w[1] ? '' : 'none'; $('addwin').style.display = w[1] ? 'none' : '';
+    $('interval').value = st.interval < 0 ? 'keep' : String(st.interval || 0);
+    $('shuf-on').classList.toggle('on', st.shuffle !== false); $('shuf-off').classList.toggle('on', st.shuffle === false);
+  }
+  nightCap = st.nightCap || 255;
+  if (document.activeElement !== $('br')) $('brv').textContent = brLabel($('br').value);
+  $('brnote').textContent = (st.auto ? 'Follows the room light (' + (st.lux ?? '–') + ' lux). ' : '') +
+    (st.nightCap < 255 ? 'Evening and night: never above ' + pct(st.nightCap) + ' (night limit in eo1.txt); higher settings look the same until morning.' : '');
+  const ups = st.uploads || [];
+  const hiddenIds = new Set((st.hidden || []).map(h => h.id));
+  $('upcount').textContent = ups.length ? ups.length + (ups.length === 1 ? ' picture' : ' pictures') : '';
+  $('uploads').innerHTML = ups.slice().reverse().map(u =>
+    hiddenIds.has('local-up-' + u.id)            // hidden from the slideshow: greyed out, tap to show it again
+      ? `<div class="thumb is-hidden" onclick="unhide('local-up-${u.id}')" title="Hidden - tap to show again"><img loading="lazy" src="/?cmd=uploadThumb&id=${u.id}&token=${T}" alt=""><span class="hidden-tag">hidden</span><button onclick="event.stopPropagation(); delUpload('${u.id}')">✕</button></div>`
+      : `<div class="thumb"><img loading="lazy" src="/?cmd=uploadThumb&id=${u.id}&token=${T}" alt=""><button onclick="delUpload('${u.id}')">✕</button></div>`).join('');
+  $('titles-on').classList.toggle('on', !!st.titles); $('titles-off').classList.toggle('on', !st.titles);
+  $('fontrow').style.opacity = st.titles ? 1 : .45;
+  for (const e of ['blur', 'mat', 'black']) $('edges-' + e).classList.toggle('on', (st.edges || 'blur') === e);
+  for (const f of ['sans', 'eo', 'serif']) $('font-' + f).classList.toggle('on', (st.titleFont || 'sans') === f);
+  const hid = st.hidden || [];
+  $('hidebtn').style.display = String((st.showing || {}).id || '').startsWith('local-') ? '' : 'none';
+  $('hiddencard').style.display = hid.length ? '' : 'none';
+  $('hiddencount').textContent = hid.length ? hid.length + ' hidden' : '';
+  $('hiddenlist').innerHTML = hid.map(h => `<label class="line"><span>${(h.title || h.id).replace(/</g, '&lt;')}</span><button style="min-height:40px;padding:8px 12px;font-weight:500" onclick="unhide('${h.id}')">Show again</button></label>`).join('');
+  $('ver').textContent = st.version || '';
+  showRemote(st.remote);
+  showAlbums(st);
+  showLive(st.liveRemote);
+  $('ghnow').textContent = st.githubRepo || 'not set';
+  if (!$('ghrepo').value && document.activeElement !== $('ghrepo')) $('ghrepo').value = st.githubRepo || '';
+  const inst = st.install;
+  $('installcard').style.display = st.fromStick || inst ? '' : 'none';
+  $('instbtn').disabled = !!(inst && (!inst.done || !inst.error));
+  const art = inst && inst.done && !inst.error ? inst.art : null;
+  $('instart').style.display = art != null ? '' : 'none';
+  $('instart').textContent = art ? `Your ${art} Electric Objects artwork${art === 1 ? ' is' : 's are'} saved in eo-art/ on this USB stick. ` +
+    'Put the stick in your computer and copy that folder: it is the only copy.' : 'No Electric Objects art was left on this EO1.';
+  $('instbtn').textContent = !inst ? 'Install' : inst.error ? 'Try again' : inst.done ? 'Installed: remove the USB stick, then restart the EO1'
+    : 'Installing… ' + inst.step + '/' + inst.total + ' ' + inst.text;
+  const up = st.uptime || 0;
+  $('tiles').innerHTML = [
+    [up >= 86400 ? Math.floor(up / 86400) + 'd ' + Math.floor(up % 86400 / 3600) + 'h' : Math.floor(up / 3600) + 'h ' + Math.floor(up % 3600 / 60) + 'm', 'Uptime'],
+    [st.screenOn ? pct(st.brightness || 0) : 'Off', 'Light'],
+    [st.lux != null ? Math.round(st.lux) + ' lx' : '–', 'Room'],
+    [st.temp != null ? Math.round(st.temp) + ' °C' : '–', 'Temp'],
+  ].map(([v, k]) => `<div class="tile"><b>${v}</b><span>${k}</span></div>`).join('');
+  const w = st.wifi || {};
+  $('status').innerHTML = [
+    ['Wi-Fi', w.connected ? esc(w.ssid || '') + (w.signal != null ? ' · ' + w.signal + ' %' : '') : 'not connected'],
+    ['Gallery', (st.galleryItems || 0) + ' from ' + esc(st.githubRepo || (st.serverSet ? 'the server' : 'the gallery on this EO1')) + (ups.length ? ' + ' + ups.length + ' from your phone' : '')],
+    ['Clock', new Date(st.time || Date.now()).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}) + (st.ntp ? '' : ' (not synced)')],
+    ['Storage', st.storage ? st.storage.freeMB + ' MB free of ' + st.storage.totalMB + ' MB' +
+      (st.storage.freeMB < 60 ? ' – almost full: a bigger gallery will not fit' : '') : ''],
+    ['Version', st.version || ''],
+  ].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
+}
+async function refresh() {
+  try { st = (await call('status')); render(); } catch (e) { $('title').textContent = /token/i.test(e.message) ? 'This link has no access code. Hold the button on the EO1 for 4 seconds and scan the QR code it shows.' : 'Cannot reach EO1'; }
+  $('shot').src = '/?' + new URLSearchParams({cmd: 'screenshot', w: 270, q: 70, token: T, t: Date.now()});
+}
+// full screen: what the frame shows right now, in a size for the phone's screen, refreshed while open
+let bigTimer = null;
+function bigUrl() {
+  const w = Math.min(1080, Math.round(Math.min(screen.width, innerWidth) * (devicePixelRatio || 1)));
+  return '/?' + new URLSearchParams({cmd: 'screenshot', w, q: 85, token: T, t: Date.now()});
+}
+function openBig() {
+  $('bigimg').src = bigUrl();
+  $('big').classList.add('open');
+  bigTimer = setInterval(() => { const i = new Image(); i.onload = () => { $('bigimg').src = i.src; }; i.src = bigUrl(); }, 4000);
+}
+function closeBig() { $('big').classList.remove('open'); clearInterval(bigTimer); }
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeBig(); });
+function tick() { $('clock').textContent = new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}); }
+// the phone knows the time even without internet: the frame takes it if it has none
+call('setTime', {value: Date.now(), tz: Intl.DateTimeFormat().resolvedOptions().timeZone || ''}).catch(() => {});
+refresh(); tick(); loadKeys();
+setInterval(tick, 10000);
+setInterval(() => { if (!document.hidden) refresh(); }, 6000);
+</script>
+</body>
+</html>

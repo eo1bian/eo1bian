@@ -1,0 +1,63 @@
+#!/bin/sh
+# Network watch for the NetworkManager-free Wi-Fi (wpa_supplicant@wlan0 + systemd-networkd).
+# 1. 100 s after boot: no network at all -> hand the interface to NetworkManager (the old safety net, so the
+#    frame is never unreachable over SSH because of a wpa/networkd problem).
+# 2. Then every minute: the gateway does not answer for 3 checks in a row -> restart wpa_supplicant and
+#    networkd; still nothing after 3 such repairs (~15 min) and the frame has been up for over 6 h -> reboot
+#    (at most one reboot per 6 h, so a router that is simply off does not make the frame reboot all night).
+# 0. No Wi-Fi in eo1.txt and none saved -> the EO1's own setup Wi-Fi at once (eo1-setup-ap: join it from a
+#    phone, the screen shows how). With eo1.txt filled in, that network is used and the setup Wi-Fi only comes
+#    when it has not worked for minutes (3.). Nothing is repaired while the setup Wi-Fi runs.
+# 3. Still no network 5 min after the NetworkManager hand-over -> the setup Wi-Fi.
+# Logged to logs/netwatch.txt on the boot partition (only when it acts).
+LOG=/media/eo1usb/logs/netwatch.txt
+note() { eo1-stick-write sh -c "echo \"\$(date) $1\" >> $LOG"; }
+gw_ok() {
+	gw=$(ip route | awk '/^default/ {print $3; exit}')
+	[ -n "$gw" ] && ping -c1 -W3 "$gw" >/dev/null 2>&1
+}
+[ -e /run/eo1-nm-on ] && exit 0
+PROFILE=/media/eo1usb/state/wifi.nmconnection
+if [ ! -s "$PROFILE" ]; then
+	for i in $(seq 30); do [ -e /sys/class/net/wlan0 ] && break; sleep 1; done
+	note "no Wi-Fi in eo1.txt or saved: setup Wi-Fi started"
+	eo1-setup-ap start
+fi
+sleep 100
+SERVER=$(sed -n 's/^server=//p' /etc/eo1/eo1.conf 2>/dev/null)
+HOST=$(echo "$SERVER" | sed -n 's#^[a-z]*://\([^/]*\).*#\1#p')
+if [ ! -e /run/eo1-setup-ap.json ] && ! { [ -n "$HOST" ] && curl -s -m 5 -o /dev/null "http://$HOST/healthz"; } && ! gw_ok; then
+	if [ ! -s "$PROFILE" ]; then
+		note "no Wi-Fi saved: setup Wi-Fi started"
+		eo1-setup-ap start
+	else
+		touch /run/eo1-nm-on
+		systemctl stop wpa_supplicant@wlan0.service systemd-networkd.service 2>/dev/null
+		systemctl start NetworkManager.service
+		note "no network after 100 s with wpa_supplicant/networkd: NetworkManager started instead"
+		sleep 300
+		if ! gw_ok && [ ! -e /run/eo1-setup-ap.json ]; then
+			SSID=$(sed -n 's/^ssid=//p' "$PROFILE" | head -n 1)
+			note "still no network after 5 min: setup Wi-Fi started"
+			eo1-setup-ap start "Could not join $SSID"
+		fi
+	fi
+fi
+bad=0; repairs=0
+while :; do
+	sleep 60
+	if [ -e /run/eo1-setup-ap.json ]; then bad=0; repairs=0; continue; fi
+	[ -e /run/eo1-nm-on ] && continue
+	if gw_ok; then bad=0; repairs=0; continue; fi
+	bad=$((bad + 1))
+	[ $bad -lt 3 ] && continue
+	bad=0; repairs=$((repairs + 1))
+	if [ $repairs -le 3 ]; then
+		note "gateway unreachable for 3 min: restarting wpa_supplicant and networkd (repair $repairs)"
+		systemctl restart wpa_supplicant@wlan0.service systemd-networkd.service
+	elif [ "$(cut -d. -f1 /proc/uptime)" -gt 21600 ]; then
+		note "network still down after 3 repairs: rebooting"
+		systemctl reboot
+		exit 0
+	fi
+done

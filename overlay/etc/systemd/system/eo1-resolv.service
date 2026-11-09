@@ -1,0 +1,7 @@
+[Unit]
+Description=EO1: write resolv.conf from the DHCP lease
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/eo1-resolv

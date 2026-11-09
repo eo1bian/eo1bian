@@ -1,0 +1,28 @@
+#!/bin/sh
+# Early boot trace for bring-up: kernel log, systemd's pending/failed jobs, processes and the journal, written
+# to the stick (logs/trace-<uptime>.txt) every 3 s for the first 2 minutes, then every 15 s until 4 minutes,
+# so even a hard hang leaves evidence of the last seconds behind.
+STICK=/media/eo1usb
+eo1-stick-write sh -c "rm -f $STICK/logs/trace-*.txt"   # only the newest trace boot is kept
+mountpoint -q "$STICK" || exit 0
+while :; do
+	up=$(cut -d. -f1 /proc/uptime)
+	[ "$up" -gt 240 ] && exit 0
+	T=/run/eo1-trace.txt
+	{
+		echo "=== uptime $(cut -d' ' -f1 /proc/uptime) s  load $(cat /proc/loadavg)  mode=$(cat /run/eo1-mode 2>/dev/null)"
+		echo "--- initramfs"; cat /run/eo1-initramfs.txt 2>/dev/null
+		echo "--- pending jobs"; systemctl list-jobs --no-pager 2>&1 | head -n 40
+		echo "--- failed"; systemctl --failed --no-pager --plain 2>&1 | head -n 20
+		echo "--- ip"; ip -br addr 2>&1
+		echo "--- nmcli"; nmcli -t -f DEVICE,TYPE,STATE,CONNECTION dev 2>&1
+		echo "--- mounts"; grep -E " / | /media/eo1usb " /proc/mounts
+		echo "--- memory"; head -n 3 /proc/meminfo
+		echo "--- top processes"; ps -eo pid,etimes,pcpu,rss,comm --sort=-pcpu 2>&1 | head -n 15
+		echo "--- interrupts (top)"; sort -k2 -n -r /proc/interrupts 2>/dev/null | head -n 12
+		echo "--- dmesg"; dmesg 2>&1
+		echo "--- journal"; journalctl -b --no-pager -o short-monotonic 2>&1 | tail -n 300
+	} > "$T" 2>&1
+	eo1-stick-write cp -f "$T" "$STICK/logs/trace-$(printf %03d "$up").txt"
+	if [ "$up" -lt 120 ]; then sleep 3; else sleep 15; fi
+done
