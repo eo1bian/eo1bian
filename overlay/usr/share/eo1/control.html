@@ -36,6 +36,8 @@
   button:active, .file:active { transform: scale(.98); }
   button.primary, .file { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
   button.on { outline: 2px solid var(--accent); }
+  button.update { background: var(--ok); color: #0f1d10; border-color: var(--ok); }
+  .card.has-update { border-color: var(--ok); }
   input[type=range] { width: 100%; accent-color: var(--accent); height: 32px; }
   label.line { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
   .switch { display: flex; gap: 8px; }
@@ -93,6 +95,13 @@
       like a factory reset), and your old Electric Objects art is copied to the stick first.</div>
     <button id="instbtn" class="primary" onclick="installEmmc()">Install</button>
     <div id="instart" style="display:none;color:var(--accent);font-weight:600"></div>
+  </section>
+
+  <section class="card has-update" id="updtop" style="display:none">
+    <label class="line"><span>New EO1bian version</span><span class="muted" id="updtopver"></span></label>
+    <div class="muted" style="margin-bottom:10px">Your pictures and settings stay. If the new version does not start,
+      the EO1 goes back to this one by itself.</div>
+    <button class="update" onclick="checkUpdate()" id="updtopbtn">Install</button>
   </section>
 
   <section class="card now">
@@ -284,7 +293,7 @@
     <div id="pairkeys" class="muted"></div>
   </section>
 
-  <section class="card">
+  <section class="card" id="updcard">
     <label class="line"><span>Software</span><span class="muted" id="ver"></span></label>
     <button id="updbtn" onclick="checkUpdate()">Check for updates</button>
     <div class="muted" id="updnote"></div>
@@ -558,21 +567,30 @@ async function installEmmc() {
   try { const j = await call('installEmmc', {value: 'start', confirm: 'yes'}); toast(j.statustext); refresh(); }
   catch (e) { toast(e.message); }
 }
-async function checkUpdate() {
+async function checkUpdate(quiet) {
+  // quiet: the check when the page opens - only shows something when a new version is there
   const b = $('updbtn');
-  if (b.dataset.apply) {
+  if (b.dataset.apply && !quiet) {
     if (!confirm('Install ' + b.dataset.apply + '? The EO1 restarts, and goes back to this version by itself if the new one does not work.')) return;
-    b.disabled = true; toast('Downloading…');
+    b.disabled = $('updtopbtn').disabled = true; toast('Downloading…');
     try { const j = await call('update', {value: 'apply'}); toast(j.statustext); $('updnote').textContent = j.statustext; }
-    catch (e) { toast(e.message); b.disabled = false; }
+    catch (e) { toast(e.message); b.disabled = $('updtopbtn').disabled = false; }
     return;
   }
   b.disabled = true;
   try {
     const j = await call('update', {value: 'check'});
-    $('updnote').textContent = j.statustext;
-    if (j.available) { b.dataset.apply = j.latest; b.textContent = 'Install ' + j.latest; b.classList.add('primary'); }
-  } catch (e) { $('updnote').textContent = e.message; }
+    if (!quiet || j.available) $('updnote').textContent = j.statustext;
+    if (j.available) {
+      b.dataset.apply = j.latest;
+      b.textContent = 'Install ' + j.latest;
+      b.classList.add('update');
+      $('updcard').classList.add('has-update');
+      $('updtopver').textContent = j.current + ' → ' + j.latest;
+      $('updtopbtn').textContent = 'Install ' + j.latest;
+      $('updtop').style.display = '';
+    }
+  } catch (e) { if (!quiet) $('updnote').textContent = e.message; }
   b.disabled = false;
 }
 function auto(on) { cmd('autoBrightness', {value: on ? 'on' : 'off'}); }
@@ -717,6 +735,7 @@ function tick() { $('clock').textContent = new Date().toLocaleTimeString([], {ho
 // the phone knows the time even without internet: the frame takes it if it has none
 call('setTime', {value: Date.now(), tz: Intl.DateTimeFormat().resolvedOptions().timeZone || ''}).catch(() => {});
 refresh(); tick(); loadKeys();
+setTimeout(() => checkUpdate(true), 3000);   // a new version shows at the top, in green
 setInterval(tick, 10000);
 setInterval(() => { if (!document.hidden) refresh(); }, 6000);
 </script>
