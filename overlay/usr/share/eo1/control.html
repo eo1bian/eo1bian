@@ -236,6 +236,20 @@
   </section>
 
   <section class="card">
+    <label class="line"><span>Immich</span><span class="muted" id="imnow"></span></label>
+    <div class="muted">Pictures from albums on your own Immich server. This EO1 keeps a copy (fitted to its screen)
+      and checks for new pictures every minute. While Immich is on, it is shown instead of the GitHub gallery.</div>
+    <input class="text-in" id="imurl" placeholder="http://192.168.1.20:2283" inputmode="url" autocomplete="off"
+      autocapitalize="off" spellcheck="false">
+    <input class="text-in" id="imkey" type="password" placeholder="API key (Immich: Account settings > API keys)"
+      autocomplete="off">
+    <button onclick="immichLoad(this)">Show albums</button>
+    <div id="imalbums" style="display:grid;gap:8px;margin-top:8px"></div>
+    <button id="imsave" style="display:none;margin-top:8px" onclick="immichSave(this)">Show these albums</button>
+    <button id="imoff" style="display:none;margin-top:8px" onclick="immichOff(this)">Stop using Immich</button>
+  </section>
+
+  <section class="card">
     <label class="line"><span>Remote access</span><span class="muted" id="tsstate"></span></label>
     <div id="tsoff">
       <div class="muted" style="margin-bottom:10px">This page from anywhere, live, with the free Tailscale app on your phone:
@@ -383,6 +397,7 @@ function showAlbums(st) {
       <button class="${on ? 'on' : ''}" style="flex:1;text-align:left;min-height:48px" onclick='toggleAlbum(${k})'>
         ${on ? '&#10003; ' : ''}${esc(a.name)} <span class="muted">${a.count}${a.hidden ? ', ' + a.hidden + ' hidden' : ''}</span>
         <div class="muted" style="font-weight:400">${{github: 'from your GitHub gallery, kept on this EO1', server: 'from a server, kept on this EO1',
+          immich: 'from your Immich server, kept on this EO1',
           phone: 'uploaded from your phone, stored on this EO1'}[a.source] || ''}</div></button>
       <button style="min-height:48px;padding:8px 12px;font-weight:500" onclick='setAlbums([${k}])'>Only this</button></div>`;
   }).join('');
@@ -461,6 +476,49 @@ async function saveGallery(btn) {
     toast(j.statustext); if (r.ok) { $('ghtoken').value = ''; setTimeout(refresh, 900); }
   } catch (e) { toast('No contact with the EO1. Is your phone on the same Wi-Fi?'); }
   if (btn) { btn.disabled = false; btn.textContent = old; }
+}
+let imPicked = new Set();
+async function immichPost(cmd, extra, btn, busy) {
+  // POST with the API key in the body: it must never be in a URL
+  const body = new URLSearchParams(Object.assign({cmd, token: T, url: $('imurl').value.trim(),
+    immich_key: $('imkey').value.trim()}, extra || {}));
+  const old = btn && btn.textContent;
+  if (btn) { btn.disabled = true; btn.textContent = busy; }
+  try {
+    const r = await fetch('/', {method: 'POST', body});
+    const j = await r.json().catch(() => ({statustext: r.statusText}));
+    return Object.assign(j, {ok: r.ok});
+  } catch (e) { return {ok: false, statustext: 'No contact with the EO1. Is your phone on the same Wi-Fi?'}; }
+  finally { if (btn) { btn.disabled = false; btn.textContent = old; } }
+}
+async function immichLoad(btn) {
+  const j = await immichPost('immichAlbums', {}, btn, 'Asking Immich…');
+  if (!j.ok) { toast(j.statustext); return; }
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+  const list = j.albums || [];
+  $('imalbums').innerHTML = list.length ? list.map(a => `<button class="${imPicked.has(a.id) ? 'on' : ''}" data-id="${esc(a.id)}"
+      style="text-align:left;min-height:48px" onclick="immichPick(this)"><span class="tick">${imPicked.has(a.id) ? '&#10003; ' : ''}</span>${esc(a.name || 'Untitled')}
+      <span class="muted">${a.count}</span></button>`).join('')
+    : '<div class="muted">No albums on this Immich server yet: make one in Immich first.</div>';
+  $('imsave').style.display = list.length ? '' : 'none';
+}
+function immichPick(b) {
+  const id = b.dataset.id, on = !imPicked.has(id);
+  if (on) imPicked.add(id); else imPicked.delete(id);
+  b.classList.toggle('on', on);
+  b.querySelector('.tick').innerHTML = on ? '&#10003; ' : '';
+}
+async function immichSave(btn) {
+  if (!imPicked.size) { toast('Pick at least one album'); return; }
+  const j = await immichPost('immich', {albums: [...imPicked].join(',')}, btn, 'Saving…');
+  toast(j.statustext);
+  if (j.ok) { $('imkey').value = ''; setTimeout(refresh, 900); }
+}
+async function immichOff(btn) {
+  if (!confirm('Stop showing Immich pictures on this EO1?')) return;
+  const j = await immichPost('immich', {off: '1'}, btn, 'Stopping…');
+  toast(j.statustext);
+  if (j.ok) { imPicked = new Set(); $('imalbums').innerHTML = ''; $('imsave').style.display = 'none'; setTimeout(refresh, 900); }
 }
 let pairTimer = null, pairInfo = null;
 async function pairStart() {
@@ -563,7 +621,8 @@ function render() {
   const s = st.showing || {};
   $('title').textContent = s.title || (s.showing === 'blank' ? 'Black screen' : '–');
   // a server is only mentioned when one is set up (eo1.txt server=); normally: the GitHub gallery or this EO1
-  $('source').textContent = !st.serverSet ? (st.githubRepo ? 'Source: GitHub gallery' : 'Source: this EO1')
+  const im = st.immich || {};
+  $('source').textContent = im.url && im.albums ? 'Source: Immich' : !st.serverSet ? (st.githubRepo ? 'Source: GitHub gallery' : 'Source: this EO1')
     : {github: 'Source: GitHub gallery', server: 'Source: server', auto: 'Source: server (gallery when it is away)'}[st.source] || '';
   $('screenbtn').textContent = st.screenOn ? 'Screen off' : 'Screen on';
   $('screenbtn').classList.toggle('primary', !st.screenOn);
@@ -606,6 +665,10 @@ function render() {
   showAlbums(st);
   showLive(st.liveRemote);
   $('ghnow').textContent = st.githubRepo || 'not set';
+  $('imnow').textContent = im.url && im.albums ? im.albums + (im.albums === 1 ? ' album' : ' albums') : 'not set';
+  $('imoff').style.display = im.url ? '' : 'none';
+  if (!imPicked.size && im.albumIds) imPicked = new Set(im.albumIds);
+  if (!$('imurl').value && document.activeElement !== $('imurl')) $('imurl').value = im.url || '';
   if (!$('ghrepo').value && document.activeElement !== $('ghrepo')) $('ghrepo').value = st.githubRepo || '';
   const inst = st.install;
   $('installcard').style.display = st.fromStick || inst ? '' : 'none';
@@ -626,7 +689,7 @@ function render() {
   const w = st.wifi || {};
   $('status').innerHTML = [
     ['Wi-Fi', w.connected ? esc(w.ssid || '') + (w.signal != null ? ' · ' + w.signal + ' %' : '') : 'not connected'],
-    ['Gallery', (st.galleryItems || 0) + ' from ' + esc(st.githubRepo || (st.serverSet ? 'the server' : 'the gallery on this EO1')) + (ups.length ? ' + ' + ups.length + ' from your phone' : '')],
+    ['Gallery', (st.galleryItems || 0) + ' from ' + esc((im.url && im.albums ? 'Immich' : '') || st.githubRepo || (st.serverSet ? 'the server' : 'the gallery on this EO1')) + (ups.length ? ' + ' + ups.length + ' from your phone' : '')],
     ['Clock', new Date(st.time || Date.now()).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}) + (st.ntp ? '' : ' (not synced)')],
     ['Storage', st.storage ? st.storage.freeMB + ' MB free of ' + st.storage.totalMB + ' MB' +
       (st.storage.freeMB < 60 ? ' – almost full: a bigger gallery will not fit' : '') : ''],

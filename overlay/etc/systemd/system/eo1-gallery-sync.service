@@ -1,5 +1,5 @@
 [Unit]
-Description=EO1: copy the GitHub gallery to the frame (only what is new)
+Description=EO1: copy the gallery (GitHub or Immich) to the frame (only what is new)
 Requires=media-eo1gallery.mount
 After=media-eo1gallery.mount network-online.target
 

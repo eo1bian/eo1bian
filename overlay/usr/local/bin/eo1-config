@@ -65,6 +65,7 @@ gget() { [ -f "$GCONF" ] && sed -n "s/^$1=//p" "$GCONF" | head -n 1; }
 GHBRANCH=$(get github_branch); [ -n "$GHBRANCH" ] || GHBRANCH=eo1
 SOURCE=$(get source); [ -n "$(gget source)" ] && SOURCE=$(gget source); [ -n "$SOURCE" ] || SOURCE=auto
 [ -n "$(gget github_branch)" ] && GHBRANCH=$(gget github_branch)
+IMURL=$(gget immich_url); IMALBUMS=$(gget immich_albums)   # Immich: set on the control page only
 GHTOKEN=$(get github_token)
 if [ -n "$GHTOKEN" ] && [ "$GHTOKEN" != "(saved)" ] && [ "$GHTOKEN" != "(lagret)" ]; then
 	# a new token: into state/github-token on the boot partition, then eo1.txt says "(saved)"
@@ -92,6 +93,8 @@ auto_curve=$AUTOC
 github_repo=$GHREPO
 github_branch=$GHBRANCH
 source=$SOURCE
+immich_url=$IMURL
+immich_albums=$IMALBUMS
 update_repo=$(get update_repo)
 remote_page=$(get remote_page)
 EOF

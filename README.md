@@ -323,6 +323,15 @@ the control page stays until the file is edited again.
 - **A GitHub gallery:** a private repository made from `gallery-template/`. Put pictures and videos in it; GitHub
   prepares them for the EO1 and the frame copies them, so it keeps playing without internet. Albums let you choose
   what the frame shows.
+- **Your own Immich server:** pictures from one or more of your [Immich](https://immich.app) albums. On the
+  control page, under **Immich**, type the server's address (for example `http://192.168.1.20:2283`) and an API
+  key, tap **Show albums**, pick the albums and tap **Show these albums**. Make the key in Immich under
+  **Account settings -> API keys** with the permissions `album.read`, `asset.read`, `asset.view` and
+  `asset.download` (without `asset.download` the EO1 uses Immich's smaller previews). The EO1 checks for new
+  pictures every minute and keeps its own copy, fitted to its screen, so it keeps playing when the server is off.
+  The album names become the frame's albums. Videos from Immich are not shown yet. While Immich is on, it is
+  shown instead of the GitHub gallery (the frame keeps one gallery copy at a time; **Stop using Immich** brings
+  the GitHub gallery back, downloaded again).
 
 ## Making art for the EO1
 
@@ -415,6 +424,8 @@ Ideas we are working towards - no dates, and the frame keeps working as it is:
 - **Galleries bigger than the frame.** A rolling cache: the EO1 fetches what it will show next from your GitHub
   gallery and lets the oldest go, so it still plays without internet.
 - **Videos from your phone**, converted on the EO1 itself.
+- **More picture sources:** Nextcloud (a share link) next, then perhaps Dropbox, Google Drive or iCloud shared
+  albums. Videos from Immich too.
 - **System updates over Wi-Fi**, so a new EO1bian never needs the stick again.
 - **EO1bian as the EO1's only system, if you want it.** An opt-in for those who never want Android back:
   Android's 512 MB goes to your pictures (the video decoder's firmware is kept on the frame first). Android

@@ -2,7 +2,11 @@
 """eo1-gallery-sync: keep a copy of the frame's pictures and videos on its own storage, so it keeps showing
 them when nothing else is reachable.
 
-Two sources:
+Three sources:
+  immich  immich_url and immich_albums in eo1.conf: the pictures of one or more albums on your own Immich server,
+          read with an API key (state/immich-key on the boot partition, never in a URL or eo1.txt). Each picture
+          is fetched once, fitted to the portrait panel (1080x1920) on the frame and kept in eo1-gallery/; the
+          album names become the frame's albums. Videos are left out for now.
   github  github_repo in eo1.conf: the branch "eo1" of a GitHub gallery (gallery-template/), fetched with git
           over SSH with the frame's own read-only deploy key (state/github-deploy on the boot partition, made on
           the frame; only its public half is on GitHub) into eo1-github/ - a shallow checkout, old objects
@@ -15,20 +19,23 @@ Only missing or changed files are downloaded; files no longer in the source are 
 (same format for both sources) is written last. Storage: Android's old CACHE partition (ext4, mounted at
 /media/eo1gallery by media-eo1gallery.mount), directory eo1-gallery/. Every file goes to .part, is flushed and
 renamed, so a power cut never leaves half a picture; the eMMC is written only when the source changes.
-Run by eo1-gallery-sync.timer (2 min after boot, then every 10 min) and by the agent when settings change.
+Run by eo1-gallery-sync.timer (2 min after boot, then every minute) and by the agent when settings change.
 """
 import hashlib
+import io
 import json
 import os
 import shutil
 import signal
 import subprocess
 import sys
+import urllib.error
 import urllib.parse
 import urllib.request
 
 CONF = "/etc/eo1/eo1.conf"
 TOKEN = "/media/eo1usb/state/github-token"
+IMMICH_KEY = "/media/eo1usb/state/immich-key"
 DEPLOY_KEY = "/media/eo1usb/state/github-deploy"
 KNOWN_HOSTS = "/media/eo1usb/state/github_known_hosts"
 ROOT = "/media/eo1gallery"
@@ -54,8 +61,11 @@ def conf():
     return c
 
 
-def fetch(url, dst, headers, sha=None):
-    """download to dst (via .part, flushed); sha256 checked when the source gives one"""
+def fetch(url, dst, headers, sha=None, fit=False):
+    """download to dst (via .part, flushed); sha256 checked when the source gives one; fit: a picture made to fit
+    the portrait panel first (Immich: the original can be a 50 MB camera file)"""
+    if fit:
+        return fetch_fitted(url, dst, headers)
     tmp = dst + ".part"
     h = hashlib.sha256()
     req = urllib.request.Request(url, headers=headers)
@@ -74,6 +84,58 @@ def fetch(url, dst, headers, sha=None):
     os.replace(tmp, dst)
 
 
+def fit_picture(data, dst):
+    """A picture (any size Pillow reads) -> at most 1080x1920, turned upright, JPEG; written via .part and flushed.
+    The same fitting as a picture sent from the phone. draft() lets a big JPEG decode at a fraction of its size,
+    so a 24-megapixel photo never needs hundreds of MB on the EO1."""
+    from PIL import Image, ImageOps
+    im = Image.open(io.BytesIO(data))
+    if im.format == "JPEG":
+        im.draft("RGB", (1080 * 2, 1920 * 2))
+    im = ImageOps.exif_transpose(im) or im
+    if im.mode in ("RGBA", "LA", "P"):
+        im = im.convert("RGBA")
+        bg = Image.new("RGB", im.size, (0, 0, 0))
+        bg.paste(im, mask=im.getchannel("A"))
+        im = bg
+    im = im.convert("RGB")
+    w, h = im.size
+    s = min(1080 / w, 1920 / h)
+    if s < 1:
+        im = im.resize((max(1, round(w * s)), max(1, round(h * s))), Image.LANCZOS, reducing_gap=3.0)
+    tmp = dst + ".part"
+    with open(tmp, "wb") as f:
+        im.save(f, "JPEG", quality=92, subsampling=0, optimize=True)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, dst)
+
+
+def get(url, headers, timeout=120, data=None, limit=None):
+    req = urllib.request.Request(url, headers=headers, data=data)
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        if limit and int(r.headers.get("Content-Length") or 0) > limit:
+            raise RuntimeError("too big for the EO1 (%d MB)" % (int(r.headers["Content-Length"]) >> 20))
+        out = r.read(limit + 1) if limit else r.read()
+        if limit and len(out) > limit:
+            raise RuntimeError("too big for the EO1")
+        return out
+
+
+def fetch_fitted(url, dst, headers):
+    """Immich: the full-size picture (what Immich shows full screen; a JPEG for any original), else its preview
+    (1440 pixels) when the full one cannot be read here: a format Pillow does not know, a raw camera file over
+    30 MB (kept out of the EO1's 1 GB of memory), or a key without the asset.download permission."""
+    last = None
+    for size in ("fullsize", "preview"):
+        try:
+            fit_picture(get(url + "?size=" + size, headers, timeout=300, limit=30 << 20), dst)
+            return
+        except Exception as e:  # noqa: BLE001 - try the smaller one
+            last = e
+    raise RuntimeError("could not read the picture: %s" % last)
+
+
 # ------------------------------------------------------------------ sources -> (manifest, {path: (url, version, size, sha)})
 def from_github(c):
     repo, branch = c["github_repo"], c.get("github_branch") or "eo1"
@@ -89,6 +151,54 @@ def from_github(c):
             if it.get(k):
                 sha = it.get(k + "_sha256")
                 files[it[k]] = (url(it[k]), sha, it.get(k + "_size") or 0, sha)
+    return manifest, files, headers
+
+
+def immich_assets(base, headers, album):
+    """All assets of one album: the search API, paged (current Immich), else the album's own list (older ones)."""
+    out, page = [], 1
+    try:
+        while page:
+            body = json.dumps({"albumIds": [album], "page": page, "size": 500, "withExif": True}).encode()
+            r = json.loads(get(base + "/api/search/metadata", dict(headers, **{"Content-Type": "application/json"}),
+                               data=body))
+            out += r.get("assets", {}).get("items", [])
+            page = r.get("assets", {}).get("nextPage")
+            page = int(page) if page else 0
+        return out
+    except urllib.error.HTTPError as e:
+        if e.code not in (400, 404):
+            raise
+    return json.loads(get(base + "/api/albums/" + album, headers)).get("assets", [])
+
+
+def from_immich(c):
+    base = c["immich_url"].rstrip("/")
+    headers = {"x-api-key": open(IMMICH_KEY).read().strip(), "Accept": "application/json",
+               "User-Agent": "eo1-gallery-sync"}
+    albums = [a.strip() for a in c.get("immich_albums", "").split(",") if a.strip()]
+    if not albums:
+        raise RuntimeError("no Immich album chosen")
+    items, files, seen = [], {}, set()
+    for album in albums:
+        info = json.loads(get(base + "/api/albums/%s?withoutAssets=true" % album, headers))
+        name = (info.get("albumName") or "Immich").strip()
+        for a in immich_assets(base, headers, album):
+            if a.get("type") != "IMAGE" or a.get("isTrashed") or a.get("id") in seen:
+                continue                             # videos: later; an asset in two albums: once
+            seen.add(a["id"])
+            p = "img/im-%s.jpg" % a["id"]
+            # a new version only when the picture itself changed (checksum) or was edited (rotated: thumbhash)
+            version = "%s|%s" % (a.get("checksum"), a.get("thumbhash"))
+            files[p] = (base + "/api/assets/%s/thumbnail" % a["id"], version, 0, None)
+            exif = a.get("exifInfo") or {}
+            items.append({"id": "im-" + a["id"], "type": "image", "file": p, "album": name,
+                          "title": (exif.get("description") or "").strip()[:120],
+                          "taken": a.get("fileCreatedAt") or a.get("localDateTime") or ""})
+    items.sort(key=lambda it: it["taken"])           # oldest first, as the album in Immich
+    for it in items:
+        del it["taken"]
+    manifest = {"version": 1, "from": "immich", "settings": {"shuffle": True}, "items": items}
     return manifest, files, headers
 
 
@@ -235,7 +345,8 @@ def git_update(git, url, branch):
 def main():
     c = conf()
     # deploy key mode needs git; without it (or without the key) the API mode with a read token below
-    if c.get("github_repo") and os.path.exists(DEPLOY_KEY) and shutil.which("git") and os.path.ismount(ROOT):
+    immich = bool(c.get("immich_url") and c.get("immich_albums") and os.path.exists(IMMICH_KEY))
+    if not immich and c.get("github_repo") and os.path.exists(DEPLOY_KEY) and shutil.which("git") and os.path.ismount(ROOT):
         try:
             changed = git_sync(c)
             changed = set_active("eo1-github") or changed
@@ -249,14 +360,14 @@ def main():
     if not os.path.ismount("/media/eo1gallery"):
         log("gallery storage not mounted")
         return 1
-    mode = "github" if c.get("github_repo") else "server"
+    mode = "immich" if immich else "github" if c.get("github_repo") else "server"
     if mode == "github" and not os.path.exists(TOKEN):
         log("github_repo set but no token yet: using the server's playlist meanwhile")
         mode = "server"
     os.makedirs(os.path.join(STORE, "img"), exist_ok=True)
     os.makedirs(os.path.join(STORE, "vid"), exist_ok=True)
     try:
-        manifest, files, headers = from_github(c) if mode == "github" else from_server(c)
+        manifest, files, headers = {"immich": from_immich, "github": from_github, "server": from_server}[mode](c)
     except Exception as e:  # noqa: BLE001 - offline, wrong token, no build yet: keep what is here
         log("%s not available: %s" % (mode, e))
         return 1
@@ -282,7 +393,7 @@ def main():
             failed += 1
             continue
         try:
-            fetch(url, dst, headers, sha)
+            fetch(url, dst, headers, sha, fit=mode == "immich")
             index[p] = version
             changed += 1
             log("got", p, "%.1f MB" % (os.path.getsize(dst) / 1e6))
@@ -309,7 +420,7 @@ def main():
         os.replace(path + ".tmp", path)
         changed += 1
     log("gallery (%s): %d items here, %d changes, %d failed" % (mode, len(manifest["items"]), changed, failed))
-    if changed and mode == "github":
+    if changed and mode in ("github", "immich"):
         notify_player()
     if mode == "github":
         apply_control(manifest)

@@ -296,6 +296,66 @@ PAGE_FILES = {                                   # the control page as an app on
 }
 
 
+GALLERY_KEYS = ("github_repo", "github_branch", "source", "immich_url", "immich_albums")
+IMMICH_KEY = STICK + "/state/immich-key"
+
+
+def save_gallery_conf(**new):
+    """The gallery settings (GitHub and Immich) into state/gallery.conf on the boot partition (they survive
+    reboots; eo1-config reads them at boot) and, live, into eo1.conf."""
+    cur = conf()
+    vals = {k: new.get(k, cur.get(k, "")) for k in GALLERY_KEYS}
+    vals["github_branch"] = vals["github_branch"] or "eo1"
+    vals["source"] = vals["source"] or "auto"
+    with open("/run/eo1-gallery.conf", "w") as f:
+        f.write("".join("%s=%s\n" % (k, vals[k]) for k in GALLERY_KEYS))
+    sh(["eo1-stick-write", "--put", "/run/eo1-gallery.conf", STICK + "/state/gallery.conf"], timeout=60)
+    lines = [l for l in open(CONF).read().splitlines() if not l.startswith(tuple(k + "=" for k in GALLERY_KEYS))]
+    lines += ["%s=%s" % (k, vals[k]) for k in GALLERY_KEYS]
+    with open(CONF + ".tmp", "w") as f:
+        f.write("\n".join(lines) + "\n")
+    os.replace(CONF + ".tmp", CONF)
+    return vals
+
+
+def put_secret(value, dst):
+    """A key or token onto the boot partition's state/ (never into a URL, never into eo1.txt)."""
+    tmp = "/run/eo1-secret.tmp"
+    with open(tmp, "w") as f:
+        os.chmod(tmp, 0o600)
+        f.write(value)
+    rc, _, err = sh(["eo1-stick-write", "--put", tmp, dst], timeout=60)
+    os.unlink(tmp)
+    if rc != 0:
+        raise RuntimeError("could not save it: " + err.strip()[:120])
+
+
+IMMICH_URL = re.compile(r"https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~/-]*)?")
+IMMICH_ID = re.compile(r"[0-9a-fA-F-]{36}")
+
+
+def immich_albums(url, key):
+    """The albums on an Immich server: [{id, name, count}] (the API key needs album.read)."""
+    req = urllib.request.Request(url.rstrip("/") + "/api/albums",
+                                 headers={"x-api-key": key, "Accept": "application/json", "User-Agent": "eo1"})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        albums = json.loads(r.read())
+    shared = []
+    try:                                         # albums shared with this user too
+        req2 = urllib.request.Request(req.full_url + "?shared=true", headers=req.headers)
+        with urllib.request.urlopen(req2, timeout=20) as r:
+            shared = json.loads(r.read())
+    except Exception:  # noqa: BLE001 - only the own albums then
+        pass
+    seen, out = set(), []
+    for a in albums + shared:
+        if a.get("id") in seen:
+            continue
+        seen.add(a.get("id"))
+        out.append({"id": a.get("id"), "name": a.get("albumName") or "", "count": a.get("assetCount", 0)})
+    return sorted(out, key=lambda a: a["name"].lower())
+
+
 def gallery_space():
     """The gallery partition in MB: a GitHub gallery takes about twice its size (git's packed copy + the files)."""
     try:
@@ -401,7 +461,7 @@ def albums_info():
         gal = os.path.join("/media/eo1gallery", open("/media/eo1gallery/active").read().strip())
         m = json.load(open(os.path.join(gal, "manifest.json"), encoding="utf-8"))
         default = m.get("settings", {}).get("albums") or []
-        origin = "github" if "github" in gal else "server"
+        origin = "github" if "github" in gal else "immich" if m.get("from") == "immich" else "server"
         items = [(it.get("album") or "", "local-" + it["id"]) for it in m.get("items", [])]
     except (OSError, ValueError, KeyError):
         pass
@@ -1075,7 +1135,10 @@ class H(BaseHTTPRequestHandler):
                 "autoMin": AUTO["min"], "autoMax": AUTO["max"], "autoOffset": AUTO["offset"],
                 "schedule": load_settings().get("schedule", {"enabled": False, "windows": []}),
                 "interval": load_settings().get("interval", 0), "offMode": off_mode(), "source": c.get("source", "auto"), "serverSet": bool(c.get("server")),
-                "githubRepo": c.get("github_repo", ""), "galleryItems": n_gal, "uploads": uploads_index(),
+                "githubRepo": c.get("github_repo", ""), "galleryItems": n_gal,
+                "immich": {"url": c.get("immich_url", ""), "albums": len([a for a in c.get("immich_albums", "").split(",") if a]),
+                           "albumIds": [a for a in c.get("immich_albums", "").split(",") if a],
+                           "key": os.path.exists(IMMICH_KEY)}, "uploads": uploads_index(),
                 "hidden": hidden_list(),
                 "titles": bool((lambda: json.load(open("/media/eo1gallery/settings.json")))().get("titles"))
                 if os.path.exists("/media/eo1gallery/settings.json") else False,
@@ -1506,30 +1569,66 @@ class H(BaseHTTPRequestHandler):
                 return self.reply(400, "repo: owner/name")
             token = q.get("github_token", "").strip()   # not "token": that is the agent's own access word
             if token:
-                with open("/run/eo1-github-token", "w") as f:
-                    os.chmod("/run/eo1-github-token", 0o600)
-                    f.write(token)
-                rc, _, err = sh(["eo1-stick-write", "--put", "/run/eo1-github-token", STICK + "/state/github-token"],
-                                timeout=60)
-                os.unlink("/run/eo1-github-token")
-                if rc != 0:
-                    return self.reply(500, "could not save the token: " + err.strip()[:120])
-            with open("/run/eo1-gallery.conf", "w") as f:
-                f.write("github_repo=%s\ngithub_branch=%s\nsource=%s\n" % (repo, branch, source))
-            sh(["eo1-stick-write", "--put", "/run/eo1-gallery.conf", STICK + "/state/gallery.conf"], timeout=60)
+                try:
+                    put_secret(token, STICK + "/state/github-token")
+                except RuntimeError as e:
+                    return self.reply(500, "the token: %s" % e)
             # live: the same keys in eo1.conf, the player restarted when the source changed, a sync now
-            lines = [l for l in open(CONF).read().splitlines()
-                     if not l.startswith(("github_repo=", "github_branch=", "source="))]
-            lines += ["github_repo=" + repo, "github_branch=" + branch, "source=" + source]
-            with open(CONF + ".tmp", "w") as f:
-                f.write("\n".join(lines) + "\n")
-            os.replace(CONF + ".tmp", CONF)
+            save_gallery_conf(github_repo=repo, github_branch=branch, source=source)
             if source != cur.get("source", "auto"):
                 sh("systemctl restart eo1-player")
             if repo:
                 sh("systemctl start --no-block eo1-gallery-sync.service")
             return self.reply(200, "Gallery %s (%s), source %s%s" % (repo or "none", branch, source,
                                                                    ", token saved" if token else ""))
+        if cmd in ("immich", "immichAlbums"):
+            # Immich: the server, its API key (POST only: never in a URL) and the albums to show.
+            # immichAlbums lists the server's albums (with a new key, or the saved one); immich saves the choice;
+            # immich with off=1 stops using Immich (the GitHub gallery, if set up, plays again)
+            if self.command != "POST":
+                return self.reply(405, "use POST (the API key must not be in a URL)")
+            if cmd == "immich" and q.get("off") == "1":
+                save_gallery_conf(immich_url="", immich_albums="")
+                sh("systemctl start --no-block eo1-gallery-sync.service")
+                return self.reply(200, "Immich is off")
+            url = (q.get("url") or c.get("immich_url", "")).strip().rstrip("/")
+            if not IMMICH_URL.fullmatch(url):
+                return self.reply(400, "The Immich address, e.g. http://192.168.1.20:2283")
+            key = q.get("immich_key", "").strip()
+            if not key and os.path.exists(IMMICH_KEY):
+                key = open(IMMICH_KEY).read().strip()
+            if not re.fullmatch(r"[A-Za-z0-9_-]{20,100}", key):
+                return self.reply(400, "The API key from Immich (Account settings > API keys)")
+            try:
+                albums = immich_albums(url, key)
+            except urllib.error.HTTPError as e:
+                return self.reply(400, "Immich said %d: %s" % (e.code, "wrong API key, or it may not read albums"
+                                                               if e.code in (401, 403) else e.reason))
+            except Exception as e:  # noqa: BLE001
+                return self.reply(400, "No answer from %s (%s)" % (url, str(e)[:80]))
+            if cmd == "immichAlbums":
+                return self.reply(200, "%d albums" % len(albums), {"albums": albums})
+            chosen = [a for a in q.get("albums", "").split(",") if a.strip()]
+            if not chosen or not all(IMMICH_ID.fullmatch(a) for a in chosen):
+                return self.reply(400, "Pick at least one album")
+            known = {a["id"]: a["name"] for a in albums}
+            if any(a not in known for a in chosen):
+                return self.reply(400, "That album is not on the server (any more)")
+            if q.get("immich_key", "").strip():
+                try:
+                    put_secret(key, IMMICH_KEY)
+                except RuntimeError as e:
+                    return self.reply(500, "the API key: %s" % e)
+            save_gallery_conf(immich_url=url, immich_albums=",".join(chosen))
+            with SETTINGS_LOCK:                  # only some albums play: the Immich ones just picked play too
+                cur = load_settings()
+                on = cur.get("albums") or []
+                if on and any(known[a] not in on for a in chosen):
+                    cur["albums"] = on + [known[a] for a in chosen if known[a] not in on]
+                    save_settings(cur)
+            sh("systemctl start --no-block eo1-gallery-sync.service")
+            return self.reply(200, "Immich: %s - the pictures arrive within a few minutes"
+                              % ", ".join(known[a] for a in chosen))
         if cmd == "wifiAdd":
             if self.command != "POST":
                 return self.reply(405, "use POST (the password must not be in a URL)")
