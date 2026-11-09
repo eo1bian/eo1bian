@@ -349,6 +349,22 @@ single clear subject with breathing room, rich tones, no text, no watermark, no 
 
 For video, add: `seamless loop, 12 seconds, slow gentle motion, static camera`.
 
+**Straight onto the frame with an AI assistant.** An assistant that can work in GitHub (for example Claude with
+a GitHub MCP connector) can make a picture and put it in your [GitHub gallery](#your-electric-objects-art-back-on-the-frame)
+for you: GitHub builds it in a few minutes, and the EO1 picks it up at its next check, within about 5 minutes.
+Something like this works:
+
+```
+Make a picture for my EO1 art frame and add it to my GitHub repository your-name/your-gallery:
+a 1080x1920 portrait PNG or JPEG in images/AI art/ with a short file name, and its title in
+gallery.json under "titles" (for example "images/AI art/sunset.png": "Sunset").
+Commit it to the main branch; leave the branch eo1 alone (GitHub builds that).
+```
+
+Give the assistant access to that one repository only (a fine-grained token with **Contents: Read and write**),
+never to your whole account. Want only the assistant's pictures on the frame for a while? Choose the album
+**AI art** on the control page or in the remote.
+
 ## Wi-Fi
 
 The EO1's Wi-Fi works with **2.4 GHz** networks using **WPA2** (or open networks). It cannot join 5 GHz-only
