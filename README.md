@@ -89,7 +89,7 @@ recovery story.
 - A phone, and the name and password of your home Wi-Fi (2.4 GHz, WPA2)
 
 That's all: no keyboard, no mouse, no computer at the frame, no opening the back. This is the most straightforward
-setup we could make for a frame that has only a micro-USB port and two touch buttons.
+setup we could make for a frame that has only a micro-USB port and one touch button on top.
 
 ## Set it up
 
@@ -165,7 +165,7 @@ Everything is on the control page on your phone (`http://<eo1 address>:2324/`, o
 - **Hide** pictures you don't want to see, **Connect a computer** (SSH in one command), **Software updates**,
   storage, Wi-Fi and status
 
-The two touch buttons on the frame work too: a short press turns the screen on or off, a long press shows the next
+The touch button on top of the frame works too: a short press turns the screen on or off, a long press shows the next
 picture, and holding for 4 seconds shows the control page's QR code again.
 
 Pictures and videos cross-fade smoothly, and videos keep moving during the fade - the frame's own video and
