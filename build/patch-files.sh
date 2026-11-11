@@ -35,3 +35,10 @@ if [ -f ../out/eo1-video ]; then cp -f ../out/eo1-video usr/local/bin/eo1-video;
 if [ -f ../out/eo1-layers ]; then cp -f ../out/eo1-layers usr/local/bin/eo1-layers; FILES="$FILES usr/local/bin/eo1-layers"; fi
 if [ -f ../out/eo1-grab ]; then cp -f ../out/eo1-grab usr/local/bin/eo1-grab; FILES="$FILES usr/local/bin/eo1-grab"; fi
 if [ -f ../out/eo1-compose ]; then cp -f ../out/eo1-compose usr/local/bin/eo1-compose; FILES="$FILES usr/local/bin/eo1-compose"; fi
+# GStreamer elements missing from the root filesystem (qtdemux, v4l2h264dec, h264parse, kmssink): build/gst-plugins.sh
+if [ -d ../out/gst/usr ]; then
+	cp -a ../out/gst/usr/. usr/
+	FILES="$FILES $(cd ../out/gst && find usr -type f -o -type l | sort | tr '\n' ' ')"
+else
+	echo "note: no out/gst (run build/gst-plugins.sh): videos will not play" >&2
+fi

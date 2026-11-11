@@ -13,6 +13,7 @@ the MIT licence of this repository. The image also contains other people's work 
 | DejaVu fonts | `/usr/share/fonts/truetype/dejavu/` | Bitstream Vera / DejaVu licence (Debian `fonts-dejavu-core`) |
 | QR Code generator (`qrcodegen.py`) | `/usr/local/lib/eo1/` | MIT, Project Nayuki (notice at the top of the file) |
 | Wi-Fi firmware (TI WiLink) | `/lib/firmware/ti-connectivity/` | redistributable firmware from Debian's `firmware-ti-connectivity` |
+| GStreamer plugins (qtdemux, v4l2h264dec, h264parse, kmssink) | `/usr/lib/arm-linux-gnueabihf/gstreamer-1.0/` and the libraries `libgstcodecparsers-1.0`, `libv4l2`, `libv4lconvert` - unchanged files from Debian's `gstreamer1.0-plugins-good`, `gstreamer1.0-plugins-bad`, `libgstreamer-plugins-bad1.0-0`, `libv4l-0` and `libv4lconvert0` (bookworm armhf), carried in the runtime patch by `build/gst-plugins.sh` | LGPL-2.1+ (source: those Debian source packages) |
 | Tailscale (optional remote access) | `tailscale`, `tailscaled` - installed from Tailscale's own Debian repository (`build/tailscale.list`) | BSD-3-Clause (github.com/tailscale/tailscale) |
 
 **Not in the image:** the video decoder firmware (NXP's `vpu_fw_imx6*.bin`) is not redistributable, so EO1bian
