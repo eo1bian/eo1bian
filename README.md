@@ -29,6 +29,10 @@ Nope. Before anything is installed, the art still on your frame is saved to the 
 and if it cannot be saved, the installer refuses to run. Copy that folder to your computer afterwards: it may
 be the only copy in the world.
 
+**Does it work on the EO2?**
+No. The EO2 is a different machine inside (an Amlogic chip, not the EO1's i.MX6) and it does not start from a
+USB stick, so EO1bian is for the EO1 only. See [EO1bian and the EO2](#eo1bian-and-the-eo2).
+
 **Does it rely on cloud services?**
 Nope. Everything is stored on the frame itself: pictures you send from your phone stay there and play without
 internet. The cloud-era conveniences are rebuilt so that you own them: the optional gallery lives in your own
@@ -403,6 +407,19 @@ the network after the restart, it puts the previous version back by itself.
 - A few EO1s may have a start-up program that looks at the internal memory first, or one that was updated by
   hand. EO1bian does not change the start-up program (that is what keeps it brick-free); tools from other projects
   that do are at your own risk.
+
+## EO1bian and the EO2
+
+EO1bian runs on the **EO1 only**. The second-generation EO2 looks alike but is a different computer inside: an
+Amlogic S805 instead of the EO1's NXP i.MX6, with its own display chain. The EO1 starts from a stick because
+its start-up program sits on a separate chip and looks at USB first; the EO2 has no such chip and only looks at
+its own internal memory. So an EO2 will not start EO1bian, and the "cannot brick" promise above does not carry
+over to it. EO2 frames have been lost to images made for other boxes: please don't flash anything onto an EO2
+unless you are ready to lose it.
+
+[aphex3k](https://github.com/aphex3k) has written down what is known about booting the EO2, with sources:
+[EO2 findings](https://github.com/aphex3k/eo1bian/blob/main/docs/EO2-FINDINGS.md). If you have an EO2 and a
+serial console, that is the place to start.
 
 ## Several EO1s
 
