@@ -418,7 +418,7 @@ over to it. EO2 frames have been lost to images made for other boxes: please don
 unless you are ready to lose it.
 
 [aphex3k](https://github.com/aphex3k) has written down what is known about booting the EO2, with sources:
-[EO2 findings](https://github.com/aphex3k/eo1bian/blob/main/docs/EO2-FINDINGS.md). If you have an EO2 and a
+[EO2 findings](docs/EO2-FINDINGS.md). If you have an EO2 and a
 serial console, that is the place to start.
 
 ## Several EO1s
