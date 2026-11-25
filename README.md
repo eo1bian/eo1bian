@@ -177,7 +177,7 @@ display hardware does the work. The last picture is on the screen about 4 second
 
 ## Why Debian
 
-The EO1 has a 4-core i.MX6 processor, 1 GB of memory, hardware video decoding and 4 GB of built-in storage
+The EO1 has a dual-core i.MX6 processor, 1 GB of memory, hardware video decoding and 4 GB of built-in storage
 (eMMC) - plenty for pictures, GIFs and video loops, but not for Android 4.4 plus a web browser, which used most of
 it and was slow. Debian lets us keep only what a frame needs:
 
